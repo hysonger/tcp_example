@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "socket.h": "c",
+        "in.h": "c",
+        "tcp_common.h": "c",
+        "inet.h": "c",
+        "*.tcc": "c",
+        "complex": "c",
+        "fstream": "c",
+        "ostream": "c",
+        "system_error": "c",
+        "types.h": "c",
+        "errno.h": "c",
+        "errno-base.h": "c"
+    }
+}
