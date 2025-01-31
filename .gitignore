@@ -1,0 +1,12 @@
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+Makefile
+*.cmake
+*.user
+tcp_client
+tcp_server
+*.o
+*.a
+*.so
