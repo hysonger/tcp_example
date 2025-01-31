@@ -5,7 +5,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-int main(int argc, char *argv[])
+int main()
 {
     struct sockaddr_in server_addr = {0};
 
@@ -27,16 +27,19 @@ int main(int argc, char *argv[])
     }
 
     // 发送数据
-    char buf[1024] = {0};
-    fscanf(stdin, "%s", buf);
-    buf[1023] = '\0';
+    for (;;) {
+        char buf[1024] = {0};
 
-    if (send(sockfd, buf, strlen(buf), 0) < 0) {
-        fprintf(stderr, "send failed! errno=%d\n", errno);
-        return -1;
+        fgets(buf, sizeof(buf), stdin); // 不使用fscanf，因为有空格就会截断了
+        buf[sizeof(buf) / sizeof(buf[0]) - 1] = '\0';
+
+        if (send(sockfd, buf, strlen(buf), 0) < 0) {
+            fprintf(stderr, "send failed! errno=%d\n", errno);
+            return -1;
+        }
     }
 
     // 关闭套接字
-    close(sockfd);
+    //close(sockfd);
     return 0;
 }
