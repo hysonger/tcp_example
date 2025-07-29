@@ -12,7 +12,7 @@
 
 #define SIZE_OFFSET sizeof(uint16_t)
 
-void log_err(char *fmt, ...)
+void log_err(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);

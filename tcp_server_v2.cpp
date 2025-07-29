@@ -46,6 +46,15 @@ inline bool is_ignorable_error()
     return (errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR);
 }
 
+// 获取当前计算机本地时间并转换成字符串
+inline std::string get_current_time()
+{
+    time_t now = time(nullptr);
+    char buf[64] = {0};
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    return std::string(buf); 
+}
+
 class TcpServer {
 private:
     int32_t epoll_fd = -1;
@@ -146,7 +155,7 @@ private:
         this->read_data(client_fd, buf, msg_size - SIZE_OFFSET); // msg_size包含头长，要减去
 
         buf[msg_size] = '\0'; // msg_size的最大值为65535，缓冲区已留足长度
-        std::cout << "===> The client " + std::to_string(client_fd) + " message is \n" << buf << std::endl;
+        std::cout << "===> [" << get_current_time() << "] The client " + std::to_string(client_fd) + " message is \n" << buf << std::endl;
     }
 
 public:
