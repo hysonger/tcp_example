@@ -41,6 +41,11 @@ public:
 
 // === EXCEPTION END ===
 
+inline bool is_ignorable_error()
+{
+    return (errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR);
+}
+
 class TcpServer {
 private:
     int32_t epoll_fd = -1;
@@ -93,12 +98,34 @@ private:
         this->client_fds.erase(client_fd); 
     }
 
+    void read_data(int32_t client_fd, char *buf, uint16_t recv_size)
+    {
+        uint16_t recvd_size = 0;
+        for (uint32_t recv_times = 0; recv_times < MAX_RETRY_TIMES; recv_times++) {
+            int32_t len = static_cast<int32_t>(recv(client_fd, buf + recvd_size, recv_size - recvd_size, 0));
+            
+            if (len < 0) {
+                if (is_ignorable_error()) {
+                    continue;
+                }
+                throw SocketFaultException("Failed to recv data, errno=" + std::to_string(errno), __FILE__, __LINE__);
+            }
+
+            recvd_size += (uint16_t)len;
+            if (recvd_size >= recv_size) {
+                return;
+            }
+        }
+
+        throw SocketFaultException("Reached max retries, errno=" + std::to_string(errno), __FILE__, __LINE__);
+    }
+
     void deal_client_msg(int32_t client_fd)
     {
-        // 获取socket的tcp建链状态；当tcp连接被关闭时，获取出的tcp状态会是非ESTABLISHED
         struct tcp_info tcpinfo;
         socklen_t tcpinfo_len = sizeof(tcpinfo);
 
+        // 获取socket的tcp建链状态；当tcp连接被关闭时，获取出的tcp状态会是非ESTABLISHED
         getsockopt(client_fd, IPPROTO_TCP, TCP_INFO, &tcpinfo, &tcpinfo_len);
         if (tcpinfo.tcpi_state != TCP_ESTABLISHED) {
             std::cout << "===> The client " + std::to_string(client_fd) + " is not in ESTABLISHED state, tcp state is "
@@ -110,34 +137,26 @@ private:
         std::cout << "===> Start to deal client " + std::to_string(client_fd) + " message" << std::endl;
 
         char buf[BUFFER_SIZE] = {0};
-        for (uint32_t recv_times = 0; recv_times < 64; recv_times++) {
-            int32_t len = static_cast<int32_t>(recv(client_fd, buf, sizeof(buf) - 1, 0)); // 这里需要比buf的全长小1,留出\0
-            
-            if (len < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-                    continue;
-                }
-                throw SocketFaultException("Failed to recv data, errno=" + std::to_string(errno), __FILE__, __LINE__);
-            }
+        this->read_data(client_fd, buf, SIZE_OFFSET);
 
-            if (len == 0) {
-                std::cout << "===> The recvd len of client " + std::to_string(client_fd) + " is zero" << std::endl;
-                break;
-            }
-
-            buf[len] = '\0';
-            std::cout << std::string(buf, sizeof(buf)) << std::flush;
+        uint16_t msg_size = ntohs(*(uint16_t *)buf);
+        if (msg_size < SIZE_OFFSET) {
+            throw SocketFaultException("The message size is invalid, msg_size=" + std::to_string(msg_size), __FILE__, __LINE__);
         }
+        this->read_data(client_fd, buf, msg_size - SIZE_OFFSET); // msg_size包含头长，要减去
 
-        std::cout << std::endl;
+        buf[msg_size] = '\0'; // msg_size的最大值为65535，缓冲区已留足长度
+        std::cout << "===> The client " + std::to_string(client_fd) + " message is \n" << buf << std::endl;
     }
 
 public:
-    constexpr static int32_t MAX_ACCEPT_SIZE = 5; // listen_fd的最大accept量
-    constexpr static int32_t MAX_EPOLL_SIZE = 10; // epoll创建时的容量
-    constexpr static int32_t MAX_EPOLL_EVENT_SIZE = 10; // epoll的最大事件容量
-    constexpr static int32_t EPOLL_TIMEOUT = 2000; // ms
-    constexpr static int32_t BUFFER_SIZE = 1024;
+    constexpr static uint32_t MAX_ACCEPT_SIZE = 5; // listen_fd的最大accept量
+    constexpr static uint32_t MAX_EPOLL_SIZE = 10; // epoll创建时的容量
+    constexpr static uint32_t MAX_EPOLL_EVENT_SIZE = 10; // epoll的最大事件容量
+    constexpr static uint32_t EPOLL_TIMEOUT = 2000; // ms
+    constexpr static uint32_t BUFFER_SIZE = UINT16_MAX + 1;
+    constexpr static uint32_t SIZE_OFFSET = sizeof(uint16_t);
+    constexpr static uint32_t MAX_RETRY_TIMES = 5;
 
     TcpServer(std::string &listen_address, int16_t listen_port)
     {
@@ -233,9 +252,11 @@ public:
                     throw SocketFaultException("abnormal event, close socket, event: " + std::to_string(event[i].events), __FILE__, __LINE__);
                 }
 
-                if (event[i].data.fd == listen_fd) { // 连接监听fd的事件说明有新连接
+                if (event[i].data.fd == listen_fd) {
+                    // 连接监听fd的事件说明有新连接
                     this->accept_new_client(this->listen_fd);
-                } else { // 其他fd的事件说明有数据可读
+                } else {
+                    // 其他fd的事件说明有数据可读
                     this->deal_client_msg(event[i].data.fd);
                 }
             } catch (TcpServerException &e) {
