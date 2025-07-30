@@ -26,20 +26,20 @@ void TcpServer::accept_new_client(int32_t listen_fd)
 
     new_socket = accept(listen_fd, (sockaddr *)&client_address, &client_address_size);
     if (new_socket < 0) {
-        throw TcpRuntimeException("Failed to accept new client", __FILE__, __LINE__);
+        throw TcpRuntimeException("Failed to accept new client", __FILENAME__, __LINE__);
     }
 
     struct epoll_event event = { .events = EPOLLIN | EPOLLRDHUP, .data = { .fd = new_socket } };
     int32_t rc = epoll_ctl(this->epoll_fd, EPOLL_CTL_ADD, new_socket, &event);
     if (rc < 0) {
         close(new_socket);
-        throw TcpRuntimeException("Failed to add new client to epoll", __FILE__, __LINE__);
+        throw TcpRuntimeException("Failed to add new client to epoll", __FILENAME__, __LINE__);
     }
 
     auto pair_ret = this->client_fds.insert(new_socket);
     if (!pair_ret.second) {
         close(new_socket);
-        throw TcpRuntimeException("The client already exists in the map, fd is " + std::to_string(new_socket), __FILE__, __LINE__);
+        throw TcpRuntimeException("The client already exists in the map, fd is " + std::to_string(new_socket), __FILENAME__, __LINE__);
     }
 
     char peer_ip[INET_ADDRSTRLEN] = {0};
@@ -73,7 +73,7 @@ void TcpServer::recv_data(int32_t client_fd, char *buf, uint16_t recv_size)
                 retry_times++;
                 continue;
             }
-            throw TcpRuntimeException("Failed to recv data, error cannot be ignored", __FILE__, __LINE__);
+            throw TcpRuntimeException("Failed to recv data, error cannot be ignored", __FILENAME__, __LINE__);
         }
 
         if (len == 0) {
@@ -92,7 +92,7 @@ void TcpServer::recv_data(int32_t client_fd, char *buf, uint16_t recv_size)
         }
     }
 
-    throw TcpRuntimeException("Failed to recv data, Reached max retries", __FILE__, __LINE__);
+    throw TcpRuntimeException("Failed to recv data, Reached max retries", __FILENAME__, __LINE__);
 }
 
 void TcpServer::deal_client_msg(int32_t client_fd)
@@ -118,7 +118,7 @@ void TcpServer::deal_client_msg(int32_t client_fd)
 
     uint16_t msg_size = ntohs(*(uint16_t *)buf);
     if (msg_size < SIZE_OFFSET) {
-        throw TcpRuntimeException("The message size is invalid, msg_size=" + std::to_string(msg_size), __FILE__, __LINE__);
+        throw TcpRuntimeException("The message size is invalid, msg_size=" + std::to_string(msg_size), __FILENAME__, __LINE__);
     }
     this->recv_data(client_fd, buf, msg_size - SIZE_OFFSET); // msg_size包含头长，要减去
 
@@ -132,14 +132,14 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
     // 创建epoll
     this->epoll_fd = epoll_create(MAX_EPOLL_SIZE);
     if (epoll_fd < 0) {
-        throw TcpRuntimeException("epoll_create", __FILE__, __LINE__);
+        throw TcpRuntimeException("epoll_create", __FILENAME__, __LINE__);
     }
 
     // 创建监听新连接进入的socket
     int32_t new_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (new_socket < 0) {
         close(this->epoll_fd);
-        throw TcpRuntimeException("socket", __FILE__, __LINE__);
+        throw TcpRuntimeException("socket", __FILENAME__, __LINE__);
     }
 
     // 打开SO_REUSEADDR，防止之前处于TIME_WAIT状态的socket无法再次绑定
@@ -148,7 +148,7 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
     if (rc < 0) {
         close(new_socket);
         close(this->epoll_fd);
-        throw TcpRuntimeException("Failed to set reuse addr", __FILE__, __LINE__);
+        throw TcpRuntimeException("Failed to set reuse addr", __FILENAME__, __LINE__);
     }
 
     // 文本型地址转换为二进制
@@ -164,7 +164,7 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
     if (rc != 1) {
         close(new_socket);
         close(this->epoll_fd);
-        throw TcpRuntimeException("inet_pton ret is " + std::to_string(rc), __FILE__, __LINE__);
+        throw TcpRuntimeException("inet_pton ret is " + std::to_string(rc), __FILENAME__, __LINE__);
     }
 
     // 绑定地址
@@ -173,14 +173,14 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
         close(new_socket);
         close(this->epoll_fd);
         throw TcpRuntimeException("bind ret is " + std::to_string(rc) + " addr is " +
-            std::to_string(socket_addr.sin_addr.s_addr) + ":" + std::to_string(listen_port), __FILE__, __LINE__);
+            std::to_string(socket_addr.sin_addr.s_addr) + ":" + std::to_string(listen_port), __FILENAME__, __LINE__);
     }
 
     rc = listen(new_socket, 5);
     if (rc < 0) {
         close(new_socket);
         close(this->epoll_fd);
-        throw TcpRuntimeException("Failed to listen", __FILE__, __LINE__);
+        throw TcpRuntimeException("Failed to listen", __FILENAME__, __LINE__);
     }
 
     // 添加到epoll监听
@@ -189,7 +189,7 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
     if (rc < 0) {
         close(new_socket);
         close(this->epoll_fd);
-        throw TcpRuntimeException("epoll_ctl ret is " + std::to_string(rc), __FILE__, __LINE__);
+        throw TcpRuntimeException("epoll_ctl ret is " + std::to_string(rc), __FILENAME__, __LINE__);
     }
 
     this->listen_fd = new_socket;
@@ -230,7 +230,7 @@ void TcpServer::listen_loop()
             // 先检查是否是错误事件
             if ((event[i].events & EPOLLERR) || (event[i].events & EPOLLHUP) || (event[i].events & EPOLLRDHUP)) {
                 this->close_client(event[i].data.fd);
-                throw TcpRuntimeException("abnormal event, close socket, event: " + std::to_string(event[i].events), __FILE__, __LINE__);
+                throw TcpRuntimeException("abnormal event, close socket, event: " + std::to_string(event[i].events), __FILENAME__, __LINE__);
             }
 
             if (event[i].data.fd == listen_fd) {
@@ -241,7 +241,7 @@ void TcpServer::listen_loop()
                 this->deal_client_msg(event[i].data.fd);
             }
         } catch (TcpRuntimeException &e) {
-            std::cerr << e.what() << std::endl;
+            LOG_ERR(e.what());
             continue;
         }
     }

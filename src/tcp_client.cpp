@@ -26,7 +26,7 @@ TcpClient::TcpClient(const std::string& server_addr, uint16_t server_port) :
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
     {
-        throw TcpRuntimeException("create socket failed!", __FILE__, __LINE__);
+        throw TcpRuntimeException("create socket failed!", __FILENAME__, __LINE__);
     }
 
     // 连接服务器
@@ -35,13 +35,13 @@ TcpClient::TcpClient(const std::string& server_addr, uint16_t server_port) :
     int rc = inet_pton(AF_INET, server_addr.c_str(), &socket_addr.sin_addr);
     if (rc != 1)
     {
-        throw TcpRuntimeException("inet_pton failed! rc=" + std::to_string(rc), __FILE__, __LINE__);
+        throw TcpRuntimeException("inet_pton failed! rc=" + std::to_string(rc), __FILENAME__, __LINE__);
     }
     
     LOG_INFO("connecting to %s:%hu...\n", server_addr.c_str(), server_port);
     rc = connect(sockfd, (struct sockaddr *)&socket_addr, sizeof(socket_addr));
     if (rc < 0) {
-        throw TcpRuntimeException("connect failed! rc=" + std::to_string(rc), __FILE__, __LINE__);
+        throw TcpRuntimeException("connect failed! rc=" + std::to_string(rc), __FILENAME__, __LINE__);
     }
 
     LOG_INFO("connected to %s:%hu, waiting for input...\n", server_addr.c_str(), server_port);
@@ -64,7 +64,7 @@ void TcpClient::send_data(const char *buf, uint16_t send_size)
                 retry_times++;
                 continue;
             }
-            throw TcpRuntimeException("Failed to send data, error cannot be ignored", __FILE__, __LINE__);
+            throw TcpRuntimeException("Failed to send data, error cannot be ignored", __FILENAME__, __LINE__);
         }
 
         if (len == 0) {
@@ -83,5 +83,5 @@ void TcpClient::send_data(const char *buf, uint16_t send_size)
         }
     }
 
-    throw TcpRuntimeException("Failed to send data, reached max retries", __FILE__, __LINE__);
+    throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
 }
