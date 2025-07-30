@@ -66,7 +66,7 @@ int main(const int argc, const char *argv[])
     struct sockaddr_in server_addr = {0};
 
     // 为SIGPIPE加入处理函数；
-    // 当使用write()发送数据时，如果对方已经关闭了连接，那么write()会返回-1，并且errno会设置成EPIPE，这时需要处理这个错误，否则程序会退出并返回128+SIGPIPE
+    // 当使用write()发送数据时，如果对方已经关闭了连接，那么write()会返回-1，并且errno会设置成EPIPE，这时需要处理这个错误，否则程序会退出并返回128 + SIGPIPE
     // 用Ctrl + C退出服务端进程会在客户端触发这个问题
     // 但是如果截留该信号，也会使得下次send时的errno=EPIPE
     signal(SIGPIPE, sigpipe_handler);
