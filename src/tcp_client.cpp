@@ -1,5 +1,6 @@
 extern "C" {
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -11,18 +12,13 @@ extern "C" {
 #include <cstring>
 #include "tcp_client.hpp"
 
-void sigpipe_handler(int sig)
-{
-    LOG_INFO("SIG %d caught!", sig);
-}
-
 TcpClient::TcpClient(const std::string& server_addr, uint16_t server_port) :
     server_addr(server_addr),
     server_port(server_port)
 {
     struct sockaddr_in socket_addr = {0};
 
-    // 创建套接字
+    // 创建套接字；此时在参数2中可指定非阻塞
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
     {
@@ -44,7 +40,17 @@ TcpClient::TcpClient(const std::string& server_addr, uint16_t server_port) :
         throw TcpRuntimeException("connect failed! rc=" + std::to_string(rc), __FILENAME__, __LINE__);
     }
 
-    LOG_INFO("connected to %s:%hu, waiting for input...\n", server_addr.c_str(), server_port);
+    // 设置套接字为非阻塞
+    // 注意，对于客户端代码来说，一旦在connect之前，提前配置socket非阻塞
+    // 会导致connect高概率会不等连接完毕直接返错，errno=115
+    // 当然，其实也可之后再使用select/poll等对该socket进行状态变化侦测
+    // 触发事件时getsockopt查询SO_ERROR，以此确认建链是否最终成功，这样可不阻塞本线程
+    rc = fcntl(sockfd, F_SETFL, O_NONBLOCK);
+    if (rc < 0) {
+        throw TcpRuntimeException("fcntl failed! rc=" + std::to_string(rc), __FILENAME__, __LINE__);
+    }
+
+    LOG_INFO("connected to %s:%hu\n", server_addr.c_str(), server_port);
     this->server_fd = sockfd;
 }
 
@@ -55,33 +61,10 @@ TcpClient::~TcpClient()
 
 void TcpClient::send_data(const char *buf, uint16_t send_size)
 {
-    for (uint32_t retry_times = 0; retry_times < MAX_RETRY_TIMES; ) {
-        signal(SIGPIPE, sigpipe_handler);
-
-        ssize_t len = send(this->server_fd, buf, send_size, 0);
-        if (len < 0) {
-            if (is_ignorable_error()) {
-                retry_times++;
-                continue;
-            }
-            throw TcpRuntimeException("Failed to send data, error cannot be ignored", __FILENAME__, __LINE__);
-        }
-
-        if (len == 0) {
-            retry_times++;
-            continue;
-        }
-
-        // 只有发送长度小于剩余长度的时候，才做减法并继续循环
-        // 否则，视为发送完毕，返回
-        // 这样的写法是为了谨慎的预防无符号数回绕
-        if ((len < UINT16_MAX) && (len < (ssize_t)send_size)) {
-            send_size -= (uint16_t)len;
-            buf += len;
-        } else {
-            return;
-        }
+    try {
+        send_data_nonblock(this->server_fd, buf, send_size, MAX_RETRY_TIMES);
     }
-
-    throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
+    catch (TcpRuntimeException& e) {
+        RETHROW(e);
+    }
 }

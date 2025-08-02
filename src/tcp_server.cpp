@@ -24,75 +24,63 @@ void TcpServer::accept_new_client(int32_t listen_fd)
     sockaddr_in client_address;
     socklen_t client_address_size = sizeof(client_address);
 
-    new_socket = accept(listen_fd, (sockaddr *)&client_address, &client_address_size);
-    if (new_socket < 0) {
+    // 当有多个连接接入时，需要循环处理
+    // epoll的默认模式是ET（边缘）触发，此时必须在一次事件处理中**处理完全部的新连接**
+    // 否则其他连接不会再继续触发事件，而会丢失
+    for (uint32_t retry_times = 0; retry_times < MAX_ACCEPT_SIZE; ) {
+        // 在接受新连接时，可以使用accept4而非accept，当场指定新连接的socket为非阻塞模式
+        new_socket = accept4(listen_fd, (sockaddr *)&client_address, &client_address_size, SOCK_NONBLOCK);
+        if (new_socket < 0) {
+            // 非阻塞accept下，返回-1并不一定是出错
+            break;
+        }
+
+        /*
+        // 否则，就需要使用fcntl手动修改为非阻塞模式
+        int32_t rc = fcntl(new_socket, F_SETFL, O_NONBLOCK);
+        if (rc < 0) {
+            close(new_socket);
+            throw TcpRuntimeException("Failed to set new socket to nonblock", __FILENAME__, __LINE__);
+        }
+        */
+
+        struct epoll_event event = { .events = EPOLLIN | EPOLLRDHUP, .data = { .fd = new_socket } };
+        int32_t rc = epoll_ctl(this->epoll_fd, EPOLL_CTL_ADD, new_socket, &event);
+        if (rc < 0) {
+            close(new_socket);
+            throw TcpRuntimeException("Failed to add new client to epoll", __FILENAME__, __LINE__);
+        }
+
+        char peer_ip[INET_ADDRSTRLEN] = {0};
+        static_cast<void>(inet_ntop(AF_INET, &client_address.sin_addr, peer_ip, sizeof(peer_ip)));
+        LOG_INFO("New client connected from " + std::string(peer_ip) + ":" +
+            std::to_string(ntohs(client_address.sin_port)) + ", fd is " +
+            std::to_string(new_socket));
+    }
+
+    // EAGAIN表示的是已无新连接，其他错误码若出现均为错误
+    if (errno != EAGAIN) {
         throw TcpRuntimeException("Failed to accept new client", __FILENAME__, __LINE__);
     }
-
-    struct epoll_event event = { .events = EPOLLIN | EPOLLRDHUP, .data = { .fd = new_socket } };
-    int32_t rc = epoll_ctl(this->epoll_fd, EPOLL_CTL_ADD, new_socket, &event);
-    if (rc < 0) {
-        close(new_socket);
-        throw TcpRuntimeException("Failed to add new client to epoll", __FILENAME__, __LINE__);
-    }
-
-    auto pair_ret = this->client_fds.insert(new_socket);
-    if (!pair_ret.second) {
-        close(new_socket);
-        throw TcpRuntimeException("The client already exists in the map, fd is " + std::to_string(new_socket), __FILENAME__, __LINE__);
-    }
-
-    char peer_ip[INET_ADDRSTRLEN] = {0};
-    static_cast<void>(inet_ntop(AF_INET, &client_address.sin_addr, peer_ip, sizeof(peer_ip)));
-    std::cout << "===> New client connected from " << peer_ip << ":" << ntohs(client_address.sin_port) << ", fd is " << new_socket << std::endl;
-    
-    // 一个测试线程，测试从本端关闭socket
-    /*
-    auto close_thread = std::thread([this, new_socket]() {
-        sleep(5);
-        this->close_client(new_socket);
-    });
-    close_thread.detach();
-    */
 }
 
 void TcpServer::close_client(int32_t client_fd)
 {
-    epoll_ctl(this->epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
-    close(client_fd);
-    this->client_fds.erase(client_fd); 
-}
-
-// 带重试机制的接收函数
-void TcpServer::recv_data(int32_t client_fd, char *buf, uint16_t recv_size)
-{
-    for (uint32_t retry_times = 0; retry_times < MAX_RETRY_TIMES; ) {
-        ssize_t len = recv(client_fd, buf, recv_size, 0);
-        if (len < 0) {
-            if (is_ignorable_error()) {
-                retry_times++;
-                continue;
-            }
-            throw TcpRuntimeException("Failed to recv data, error cannot be ignored", __FILENAME__, __LINE__);
-        }
-
-        if (len == 0) {
-            retry_times++;
-            continue;
-        }
-
-        // 只有发送长度小于剩余长度的时候，才做减法并继续循环
-        // 否则，视为接收完毕，返回
-        // 这样的写法是为了谨慎的预防无符号数回绕
-        if ((len < UINT16_MAX) && (len < (ssize_t)recv_size)) {
-            recv_size -= (uint16_t)len;
-            buf += len;
-        } else {
-            return;
-        }
+    if (client_fd <= 2) {
+        throw TcpRuntimeException("Invalid client fd, fd cannot be stdio", __FILENAME__, __LINE__);
     }
 
-    throw TcpRuntimeException("Failed to recv data, Reached max retries", __FILENAME__, __LINE__);
+    epoll_ctl(this->epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
+    close(client_fd);
+}
+void TcpServer::recv_data(int32_t client_fd, char *buf, uint16_t recv_size)
+{
+    try {
+        recv_data_nonblock(client_fd, buf, recv_size, MAX_RETRY_TIMES);
+    }
+    catch (TcpRuntimeException& e) {
+        RETHROW(e);
+    }
 }
 
 void TcpServer::deal_client_msg(int32_t client_fd)
@@ -135,14 +123,17 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
         throw TcpRuntimeException("epoll_create", __FILENAME__, __LINE__);
     }
 
-    // 创建监听新连接进入的socket
-    int32_t new_socket = socket(AF_INET, SOCK_STREAM, 0);
+    // 创建处理新连接进入的监听socket
+    // 为了不使单个接入连接把accept阻塞而饿死整个流程，该socket本身应声明为非阻塞
+    // 这样accept也需要像非阻塞收发数据一样做特殊判断逻辑，见accept处注释
+    int32_t new_socket = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (new_socket < 0) {
         close(this->epoll_fd);
         throw TcpRuntimeException("socket", __FILENAME__, __LINE__);
     }
 
-    // 打开SO_REUSEADDR，防止之前处于TIME_WAIT状态的socket无法再次绑定
+    // 打开SO_REUSEADDR，防止同地址socket无法再次绑定
+    // 该情况通常出现在socket由对端提出关闭，
     int32_t optval = 1;
     int32_t rc = setsockopt(new_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
     if (rc < 0) {
@@ -199,12 +190,6 @@ TcpServer::~TcpServer()
 {
     static_cast<void>(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, listen_fd, NULL));
     close(listen_fd);
-
-    for (auto fd : client_fds) {
-        static_cast<void>(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL));
-        close(fd);
-    }
-
     close(epoll_fd);
 }
 
@@ -216,6 +201,14 @@ const std::string &TcpServer::get_listen_addr() const
 uint16_t TcpServer::get_listen_port() const
 {
     return this->listen_port;
+}
+
+void TcpServer::send_data(int32_t client_fd, const char *buf, uint16_t send_size){
+    try {
+        send_data_nonblock(client_fd, buf, send_size, MAX_RETRY_TIMES);
+    } catch (TcpRuntimeException &e) {
+        RETHROW(e);
+    }
 }
 
 // 服务器初始化后，调用该函数进入消息循环

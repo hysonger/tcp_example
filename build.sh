@@ -1,7 +1,7 @@
 #!/bin/sh
 
 if [ -d $1 ]; then
-    cmake . && make clean && make -j4
+    cmake . && make clean && make -j4 program
 elif [ $1 = "check" ]; then
     cppcheck src/ --enable=all -I /usr/include -I include/ 2>&1 | tee cppcheck.log
 fi

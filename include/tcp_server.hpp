@@ -10,7 +10,6 @@ class TcpServer {
 private:
     int32_t epoll_fd = -1;
     int32_t listen_fd = -1;
-    std::unordered_set<int32_t> client_fds;
 
     std::string listen_addr;
     uint16_t listen_port;
@@ -35,6 +34,8 @@ public:
 
     const std::string &get_listen_addr() const;
     uint16_t get_listen_port() const;
+
+    void send_data(int32_t client_fd, const char *buf, uint16_t send_size);
     void listen_loop();
 };
 
