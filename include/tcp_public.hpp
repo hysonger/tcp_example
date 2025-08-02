@@ -31,7 +31,7 @@ void __format_log(FILE *stream, const std::string& message, ...);
 
 #define __FILENAME__ (((strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)))
 
-// 使用宏的可变参数时，##使得可选参数可以被省略
+// TIPS: 使用宏的可变参数时，##使得可选参数可以被省略
 
 #define LOG_INFO(message, ...) __format_log(stdout, ((message)), ##__VA_ARGS__)
 #define LOG_ERR(message, ...) __format_log(stderr, ((message)), ##__VA_ARGS__)

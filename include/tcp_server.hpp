@@ -14,8 +14,10 @@ extern "C" {
 /*
     支持epoll多路并发的TCP服务器类
 
-    构造函数中填入监听地址和端口，然后调用listen_loop()函数开始监听；
-    请覆盖deal_client_msg()函数，在该函数中进行数据读取（调用recv_data函数），以及随后的解析工作。
+    构造函数传入监听地址和端口，然后调用listen_loop()函数开始监听；
+    请覆盖deal_client_msg()函数，在该函数中进行数据读取，以及随后的解析工作。
+
+    socket的非阻塞读写函数考虑到精简和使用灵活性，并未作为类方法，请前往tcp_public.hpp查看。
 */
 class TcpServer {
 private:
@@ -29,9 +31,9 @@ private:
 
 protected:
     void close_client(int32_t client_fd);
-    // 子类覆盖该函数，编写解析客户端消息的逻辑
+    // 子类请覆盖该函数，编写解析客户端消息的逻辑
     virtual void deal_client_msg(int32_t client_fd);
-    // 子类覆盖该函数，编写有新客户端连入的额外处理逻辑
+    // 子类请覆盖该函数，编写有新客户端连入时，需要做的额外处理逻辑
     virtual void deal_new_client(int32_t client_fd, const sockaddr_in& client_addr);
 
 public:

@@ -35,6 +35,7 @@ void __format_log(FILE *stream, const std::string& message, ...) {
     fflush(stream);
 }
 
+// 非阻塞I/O中，可以忽略的三种错误码
 inline bool is_ignorable_error()
 {
     return (errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR);
@@ -63,7 +64,7 @@ void sigpipe_handler(int sig)
 void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size)
 {
     for (uint32_t retry_times = 0; retry_times < MAX_RETRY_TIMES; ) {
-        ssize_t len = recv(socket_fd, buf, recv_size, MSG_DONTWAIT); // 在recv时，也可独立的指定非阻塞接收
+        ssize_t len = recv(socket_fd, buf, recv_size, MSG_DONTWAIT); // 在recv时，也可独立地指定非阻塞接收
         if (len < 0) {
             if (is_ignorable_error()) {
                 retry_times++;
@@ -147,6 +148,8 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
     throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
 }
 
+// 该函数主要为试验性质，通过epoll触发EPOLLOUT进而触发发送数据
+// 属于一种邪修，说不定特殊场景下会有用……
 void send_data_epoll(int32_t socket_fd, const char *buf, uint16_t send_size)
 {
     int epfd = epoll_create1(0);
@@ -158,7 +161,7 @@ void send_data_epoll(int32_t socket_fd, const char *buf, uint16_t send_size)
     epoll_ctl(epfd, EPOLL_CTL_ADD, socket_fd, &ev);
 
     for (uint32_t retry_times = 0; retry_times < EPOLL_RETRY_TIMES; ) {
-        int n = epoll_wait(epfd, events, sizeof(events) / sizeof(events[0]), EPOLL_WAIT_TIMEOUT);
+        epoll_wait(epfd, events, sizeof(events) / sizeof(events[0]), EPOLL_WAIT_TIMEOUT);
         if (events[0].data.fd != socket_fd || !(events[0].events & EPOLLOUT)) {
             continue;
         }

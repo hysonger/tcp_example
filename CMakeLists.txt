@@ -12,8 +12,8 @@ target_include_directories(tcp_server PRIVATE include)
 target_include_directories(tcp_client PRIVATE include)
 
 file(GLOB_RECURSE TEST_FILES test/*.cpp test/*.h test/*.hpp)
-add_executable(test_tcp_server test_tcp_server.cpp ${SRC_FILES} ${TEST_FILES})
-target_include_directories(test_tcp_server PRIVATE include)
+add_executable(test_tcp test_tcp.cpp ${SRC_FILES} ${TEST_FILES})
+target_include_directories(test_tcp PRIVATE include)
 
 add_custom_target(program)
 add_dependencies(program tcp_server tcp_client)

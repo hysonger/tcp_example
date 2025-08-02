@@ -12,8 +12,6 @@ extern "C" {
 #include <cstdint>
 #include <iostream>
 #include <string>
-#include <vector>
-#include <thread>
 
 #include "tcp_server.hpp"
 
@@ -24,18 +22,18 @@ void TcpServer::accept_new_client(int32_t listen_fd)
     sockaddr_in client_addr;
     socklen_t client_address_size = sizeof(client_addr);
 
-    // 当有多个连接接入时，需要循环处理
+    // 当有多个连接接入时，需要加循环处理
     // epoll中socket的模式是ET（边缘）触发时，必须在一次事件处理中**处理完全部的新输入**
-    // 否则其他连接不会再继续触发事件，而会丢失
+    // 否则其他连接不会再继续触发事件，会导致事件丢失
     for (uint32_t retry_times = 0; retry_times < MAX_ACCEPT_SIZE; ) {
         // 在接受新连接时，可以使用accept4而非accept，当场指定新连接的socket为非阻塞模式
-        new_socket = accept(listen_fd, (sockaddr *)&client_addr, &client_address_size);
+        new_socket = accept4(listen_fd, (sockaddr *)&client_addr, &client_address_size, SOCK_NONBLOCK);
         if (new_socket < 0) {
             // 非阻塞accept下，返回-1并不一定是出错
             break;
         }
         /*
-        // 否则，就需要使用fcntl手动修改为非阻塞模式
+        // 或者，使用fcntl手动修改为非阻塞模式
         int32_t rc = fcntl(new_socket, F_SETFL, O_NONBLOCK);
         if (rc < 0) {
             close(new_socket);
@@ -105,7 +103,8 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
     listen_addr(listen_addr), listen_port(listen_port)
 {
     // 创建epoll
-    this->epoll_fd = epoll_create(MAX_EPOLL_SIZE);
+    // 在现在的Linux内核，epoll_create的size参数已经无意义
+    this->epoll_fd = epoll_create1(0);
     if (epoll_fd < 0) {
         throw TcpRuntimeException("epoll_create", __FILENAME__, __LINE__);
     }
