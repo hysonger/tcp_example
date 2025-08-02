@@ -59,16 +59,6 @@ TcpClient::~TcpClient()
     close(this->conn_fd); 
 }
 
-void TcpClient::send_data(const char *buf, uint16_t send_size)
-{
-    try {
-        send_data_nonblock(this->conn_fd, buf, send_size, MAX_RETRY_TIMES);
-    }
-    catch (TcpRuntimeException& e) {
-        RETHROW(e);
-    }
-}
-
 int32_t TcpClient::get_fd() const
 {
     return this->conn_fd;

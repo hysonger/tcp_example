@@ -53,9 +53,7 @@ void TcpServer::accept_new_client(int32_t listen_fd)
 
         char peer_ip[INET_ADDRSTRLEN] = {0};
         static_cast<void>(inet_ntop(AF_INET, &client_address.sin_addr, peer_ip, sizeof(peer_ip)));
-        LOG_INFO("New client connected from " + std::string(peer_ip) + ":" +
-            std::to_string(ntohs(client_address.sin_port)) + ", fd is " +
-            std::to_string(new_socket));
+        LOG_INFO("New client connected from %s:%hu, fd is %d", peer_ip, ntohs(client_address.sin_port), new_socket);
     }
 
     // EAGAIN表示的是已无新连接，其他错误码若出现均为错误
@@ -74,34 +72,30 @@ void TcpServer::close_client(int32_t client_fd)
     close(client_fd);
 }
 
-void TcpServer::recv_data(int32_t client_fd, char *buf, uint16_t recv_size)
+void TcpServer::deal_client_msg(int32_t client_fd)
 {
     try {
-        recv_data_nonblock(client_fd, buf, recv_size, MAX_RETRY_TIMES);
+        constexpr uint32_t BUFFER_SIZE = UINT16_MAX + 1;
+        constexpr uint32_t SIZE_OFFSET = sizeof(uint16_t);
+        constexpr uint32_t MAX_RETRY_TIMES = 5;
+
+        LOG_INFO("Start to deal client %d message", client_fd);
+
+        char buf[BUFFER_SIZE] = {0};
+        recv_data_nonblock(client_fd, buf, SIZE_OFFSET, MAX_RETRY_TIMES);
+
+        uint16_t msg_size = ntohs(*(uint16_t *)buf);
+        if (msg_size < SIZE_OFFSET) {
+            throw TcpRuntimeException("The message size is invalid, msg_size=" + std::to_string(msg_size), __FILENAME__, __LINE__);
+        }
+        recv_data_nonblock(client_fd, buf, msg_size - SIZE_OFFSET, MAX_RETRY_TIMES); // msg_size包含头长，要减去
+
+        buf[msg_size] = '\0'; // msg_size的最大值为65535，缓冲区已留足长度
+        LOG_INFO("The client %d message is %s", client_fd, buf);
     }
     catch (TcpRuntimeException& e) {
         RETHROW(e);
     }
-}
-
-void TcpServer::deal_client_msg(int32_t client_fd)
-{
-    constexpr uint32_t BUFFER_SIZE = UINT16_MAX + 1;
-    constexpr uint32_t SIZE_OFFSET = sizeof(uint16_t);
-
-    std::cout << "===> Start to deal client " + std::to_string(client_fd) + " message" << std::endl;
-
-    char buf[BUFFER_SIZE] = {0};
-    this->recv_data(client_fd, buf, SIZE_OFFSET);
-
-    uint16_t msg_size = ntohs(*(uint16_t *)buf);
-    if (msg_size < SIZE_OFFSET) {
-        throw TcpRuntimeException("The message size is invalid, msg_size=" + std::to_string(msg_size), __FILENAME__, __LINE__);
-    }
-    this->recv_data(client_fd, buf, msg_size - SIZE_OFFSET); // msg_size包含头长，要减去
-
-    buf[msg_size] = '\0'; // msg_size的最大值为65535，缓冲区已留足长度
-    std::cout << "===> [" << get_current_time() << "] The client " + std::to_string(client_fd) + " message is \n" << buf << std::endl;
 }
 
 TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
@@ -192,14 +186,6 @@ const std::string &TcpServer::get_listen_addr() const
 uint16_t TcpServer::get_listen_port() const
 {
     return this->listen_port;
-}
-
-void TcpServer::send_data(int32_t client_fd, const char *buf, uint16_t send_size){
-    try {
-        send_data_nonblock(client_fd, buf, send_size, MAX_RETRY_TIMES);
-    } catch (TcpRuntimeException &e) {
-        RETHROW(e);
-    }
 }
 
 // 服务器初始化后，调用该函数进入消息循环

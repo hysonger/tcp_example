@@ -51,7 +51,7 @@ int test_tcp_communication() {
             memcpy(send_buffer + sizeof(uint16_t), test_message.c_str(), test_message.size());
             
             std::cout << "Client sending message: " << test_message << std::endl;
-            client.send_data(send_buffer, static_cast<uint16_t>(test_message.size() + sizeof(uint16_t)));
+            send_data_nonblock(client.get_fd(), send_buffer, static_cast<uint16_t>(test_message.size() + sizeof(uint16_t)), 5);
             
             delete[] send_buffer;
             

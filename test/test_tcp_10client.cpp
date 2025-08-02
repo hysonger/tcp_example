@@ -25,7 +25,7 @@ public:
         constexpr static uint32_t SIZE_OFFSET = sizeof(uint16_t);
 
         char buf[BUFFER_SIZE] = {0};
-        this->recv_data(client_fd, buf, SIZE_OFFSET);
+        recv_data_nonblock(client_fd, buf, SIZE_OFFSET, 5);
 
         uint16_t msg_size = ntohs(*(uint16_t *)buf);
         if (msg_size < SIZE_OFFSET) {
@@ -33,7 +33,7 @@ public:
             return;
         }
         
-        this->recv_data(client_fd, buf, msg_size - SIZE_OFFSET);
+        recv_data_nonblock(client_fd, buf, msg_size - SIZE_OFFSET, 5);
         buf[msg_size] = '\0';
         
         message_count++;
@@ -48,7 +48,7 @@ public:
         memcpy(reply_buf.data() + SIZE_OFFSET, reply.c_str(), reply.length());
         
         try {
-            this->send_data(client_fd, reply_buf.data(), reply.length() + SIZE_OFFSET);
+            send_data_nonblock(client_fd, reply_buf.data(), reply.length() + SIZE_OFFSET, 5);
         } catch (const TcpRuntimeException& e) {
             std::cerr << "Failed to send reply to client " << client_fd << ": " << e.what() << std::endl;
         }
@@ -86,7 +86,7 @@ void client_worker(int client_id, const std::string& server_addr, uint16_t serve
             memcpy(send_buf.data(), &msg_len, sizeof(uint16_t));
             memcpy(send_buf.data() + sizeof(uint16_t), message.c_str(), message.length());
             
-            client.send_data(send_buf.data(), message.length() + sizeof(uint16_t));
+            send_data_nonblock(client.get_fd(), send_buf.data(), message.length() + sizeof(uint16_t), 5);
             
             // 等待服务器回复 (可选)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
