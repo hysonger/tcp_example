@@ -41,6 +41,8 @@ void __format_log(FILE *stream, const std::string& message, ...);
 
 std::string get_current_time();
 
+void sendfile_nonblock(int32_t socket_fd, const std::string& file_path);
+
 void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size);
 void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size);
 

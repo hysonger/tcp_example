@@ -200,7 +200,12 @@ void TcpServer::listen_loop()
     for (int32_t i = 0; i < event_count; i++) {
         try {
             // 先检查是否是错误事件
-            if ((event[i].events & EPOLLERR) || (event[i].events & EPOLLHUP) || (event[i].events & EPOLLRDHUP)) {
+            if (event[i].events & EPOLLRDHUP) {
+                this->close_client(event[i].data.fd);
+                LOG_INFO("Client %d is closed", event[i].data.fd);
+                continue;
+            }
+            if ((event[i].events & EPOLLERR) || (event[i].events & EPOLLHUP)) {
                 this->close_client(event[i].data.fd);
                 throw TcpRuntimeException("abnormal event, close socket, event: " + std::to_string(event[i].events), __FILENAME__, __LINE__);
             }

@@ -1,13 +1,16 @@
 extern "C" {
+#include <fcntl.h>
+
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 
 #include <signal.h>
 }
 #include <ctime>
 #include "tcp_public.hpp"
-
 
 constexpr static uint32_t MAX_RETRY_TIMES = 200;
 constexpr static uint32_t IO_WAIT_TIMEOUT = 10000; // usec
@@ -146,6 +149,30 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
     }
 
     throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
+}
+
+void sendfile_nonblock(int32_t socket_fd, const std::string& file_path)
+{
+    // 首先对路径进行转义
+    std::string real_path = realpath(file_path.c_str(), nullptr);
+    
+    // 限制只能在当前目录下发送文件
+    std::string curr_path = getcwd(nullptr, 0);
+    if (real_path.find(curr_path) != 0) {
+        throw TcpRuntimeException("File path is not in current directory", __FILENAME__, __LINE__);
+    }
+
+    int file_fd = open(real_path.c_str(), O_RDONLY);
+    if (file_fd < 0) {
+        throw TcpRuntimeException("Open file failed", __FILENAME__, __LINE__);
+    }
+
+    struct stat st;
+    fstat(file_fd, &st);
+    ssize_t len = sendfile(socket_fd, file_fd, nullptr, st.st_size);
+    if (len != st.st_size) {
+        throw TcpRuntimeException("Send file failed, sendfile is incomplete", __FILENAME__, __LINE__);
+    }
 }
 
 // 该函数主要为试验性质，通过epoll触发EPOLLOUT进而触发发送数据
