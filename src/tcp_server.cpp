@@ -25,7 +25,7 @@ void TcpServer::accept_new_client(int32_t listen_fd)
     socklen_t client_address_size = sizeof(client_address);
 
     // 当有多个连接接入时，需要循环处理
-    // epoll的默认模式是ET（边缘）触发，此时必须在一次事件处理中**处理完全部的新连接**
+    // epoll中socket的模式是ET（边缘）触发时，必须在一次事件处理中**处理完全部的新输入**
     // 否则其他连接不会再继续触发事件，而会丢失
     for (uint32_t retry_times = 0; retry_times < MAX_ACCEPT_SIZE; ) {
         // 在接受新连接时，可以使用accept4而非accept，当场指定新连接的socket为非阻塞模式
@@ -73,6 +73,7 @@ void TcpServer::close_client(int32_t client_fd)
     epoll_ctl(this->epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
     close(client_fd);
 }
+
 void TcpServer::recv_data(int32_t client_fd, char *buf, uint16_t recv_size)
 {
     try {
@@ -85,19 +86,8 @@ void TcpServer::recv_data(int32_t client_fd, char *buf, uint16_t recv_size)
 
 void TcpServer::deal_client_msg(int32_t client_fd)
 {
-    // 在读取消息之前，获取socket的tcp建链状态，防止假活
-    // 如果建链socket只监听了EPOLLIN事件，或外层没有检查epoll事件是否含EPOLLRDHUP，
-    // 则对端断链也会走到这里，所以需要检查。（当然本例中是又监听又检查了的）
-    // 当tcp连接被关闭时，获取出的tcp状态会是非ESTABLISHED
-    struct tcp_info tcpinfo;
-    socklen_t tcpinfo_len = sizeof(tcpinfo);
-    getsockopt(client_fd, IPPROTO_TCP, TCP_INFO, &tcpinfo, &tcpinfo_len);
-    if (tcpinfo.tcpi_state != TCP_ESTABLISHED) {
-        std::cout << "===> The client " + std::to_string(client_fd) + " is not in ESTABLISHED state, tcp state is "
-            + std::to_string(tcpinfo.tcpi_state) << std::endl;
-        this->close_client(client_fd); // 如果不关闭，epoll中该socket的事件会一直存留，导致该事件无限触发
-        return;
-    }
+    constexpr static uint32_t BUFFER_SIZE = UINT16_MAX + 1;
+    constexpr static uint32_t SIZE_OFFSET = sizeof(uint16_t);
 
     std::cout << "===> Start to deal client " + std::to_string(client_fd) + " message" << std::endl;
 
@@ -174,8 +164,8 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
         throw TcpRuntimeException("Failed to listen", __FILENAME__, __LINE__);
     }
 
-    // 添加到epoll监听
-    struct epoll_event event = { .events = EPOLLIN, .data = { .fd = new_socket } };
+    // 添加到epoll监听，这里使用ET边缘触发！
+    struct epoll_event event = { .events = EPOLLIN | EPOLLET, .data = { .fd = new_socket } };
     rc = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_socket, &event);
     if (rc < 0) {
         close(new_socket);

@@ -12,7 +12,7 @@ extern "C" {
 #include "tcp_server.hpp"
 #include "tcp_client.hpp"
 
-void test_tcp_communication() {
+int test_tcp_communication() {
     const std::string server_addr = "127.0.0.1";
     const uint16_t server_port = 18080;
     
@@ -72,6 +72,7 @@ void test_tcp_communication() {
         std::cout << "Test completed successfully!" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Exception: " << e.what() << std::endl;
-        throw;
+        return 1;
     }
+    return 0;
 }
