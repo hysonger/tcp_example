@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(tcp_example)
 # 指定C++17和C11
-add_compile_options(-Wall -Wextra -O2 -s --std=c++17)
+add_compile_options(-g -Wall -Wextra -O2 -s --std=c++17)
 
 file(GLOB_RECURSE SRC_FILES src/*.cpp)
 add_executable(tcp_server tcp_server_v2.cpp ${SRC_FILES})

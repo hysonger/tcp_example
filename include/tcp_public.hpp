@@ -41,7 +41,9 @@ void __format_log(FILE *stream, const std::string& message, ...);
 
 std::string get_current_time();
 
-void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size, uint32_t max_retry_times);
-void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size, uint32_t max_retry_times);
+void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size);
+void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size);
+
+void send_data_epoll(int32_t socket_fd, const char *buf, uint16_t send_size);
 
 #endif // TCP_PUBLIC_HPP

@@ -40,6 +40,7 @@ TcpClient::TcpClient(const std::string& server_addr, uint16_t server_port) :
         throw TcpRuntimeException("connect failed! rc=" + std::to_string(rc), __FILENAME__, __LINE__);
     }
 
+    /*
     // 设置套接字为非阻塞
     // 注意，对于客户端代码来说，一旦在connect之前，提前配置socket非阻塞
     // 会导致connect高概率会不等连接完毕直接返错，errno=115
@@ -49,6 +50,7 @@ TcpClient::TcpClient(const std::string& server_addr, uint16_t server_port) :
     if (rc < 0) {
         throw TcpRuntimeException("fcntl failed! rc=" + std::to_string(rc), __FILENAME__, __LINE__);
     }
+    */
 
     LOG_INFO("connected to %s:%hu\n", server_addr.c_str(), server_port);
     this->conn_fd = sockfd;

@@ -1,10 +1,19 @@
 extern "C" {
 #include <sys/socket.h>
+#include <sys/epoll.h>
+#include <netinet/in.h>
 
 #include <signal.h>
 }
 #include <ctime>
 #include "tcp_public.hpp"
+
+
+constexpr static uint32_t MAX_RETRY_TIMES = 200;
+constexpr static uint32_t IO_WAIT_TIMEOUT = 10000; // usec
+
+constexpr static uint32_t EPOLL_RETRY_TIMES = 5;
+constexpr static uint32_t EPOLL_WAIT_TIMEOUT = 1000; // msec
 
 // 获取当前计算机本地时间并转换成字符串
 // e.g. 2025-08-02 18:22:51
@@ -51,22 +60,24 @@ void sigpipe_handler(int sig)
  * 
  * @throw TcpRuntimeException 当接收失败且错误不可忽略或达到最大重试次数时抛出异常
  */
-void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size, uint32_t max_retry_times)
+void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size)
 {
-    for (uint32_t retry_times = 0; retry_times < max_retry_times; ) {
+    for (uint32_t retry_times = 0; retry_times < MAX_RETRY_TIMES; ) {
         ssize_t len = recv(socket_fd, buf, recv_size, MSG_DONTWAIT); // 在recv时，也可独立的指定非阻塞接收
         if (len < 0) {
             if (is_ignorable_error()) {
                 retry_times++;
+                usleep(IO_WAIT_TIMEOUT);
                 continue;
             }
-            throw TcpRuntimeException("Failed to recv data, error cannot be ignored", __FILENAME__, __LINE__);
+            throw TcpRuntimeException("recv error: error cannot be ignored", __FILENAME__, __LINE__);
         }
 
         if (len == 0) {
-            retry_times++;
-            continue;
+            throw TcpRuntimeException("recv error: peer closed", __FILENAME__, __LINE__);
         }
+
+        retry_times = 0;
 
         // 只有发送长度小于剩余长度的时候，才做减法并继续循环
         // 否则，视为接收完毕，返回
@@ -94,9 +105,9 @@ void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size, uint32
  * 
  * @throw TcpRuntimeException 当发送失败且错误不可忽略或达到最大重试次数时抛出异常
  */
-void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size, uint32_t max_retry_times)
+void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
 {
-    for (uint32_t retry_times = 0; retry_times < max_retry_times; ) {
+    for (uint32_t retry_times = 0; retry_times < MAX_RETRY_TIMES; ) {
         // 为SIGPIPE注册处理函数；
         // 当使用write()发送数据时，如果对方已经关闭了连接
         // 那么write()会返回-1，并且errno会设置成EPIPE
@@ -105,19 +116,22 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size, 
         // 但是如果截留该信号，也会使得下次send时的errno=EPIPE，上层一样需要处理抛出异常
         signal(SIGPIPE, sigpipe_handler);
 
-        ssize_t len = send(socket_fd, buf, send_size, 0);
+        ssize_t len = send(socket_fd, buf, send_size, MSG_DONTWAIT);
         if (len < 0) {
             if (is_ignorable_error()) {
                 retry_times++;
+                usleep(IO_WAIT_TIMEOUT);
+                LOG_INFO("retry times %u", retry_times);
                 continue;
             }
-            throw TcpRuntimeException("Failed to send data, error cannot be ignored", __FILENAME__, __LINE__);
+            throw TcpRuntimeException("send error: error cannot be ignored", __FILENAME__, __LINE__);
         }
 
         if (len == 0) {
-            retry_times++;
-            continue;
+            throw TcpRuntimeException("send error: peer closed", __FILENAME__, __LINE__);
         }
+
+        retry_times = 0;
 
         // 只有发送长度小于剩余长度的时候，才做减法并继续循环
         // 否则，视为发送完毕，返回
@@ -130,5 +144,61 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size, 
         }
     }
 
+    throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
+}
+
+void send_data_epoll(int32_t socket_fd, const char *buf, uint16_t send_size)
+{
+    int epfd = epoll_create1(0);
+    struct epoll_event ev, events[1];
+
+    // 将 socket 添加到 epoll
+    ev.events = EPOLLOUT;
+    ev.data.fd = socket_fd;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, socket_fd, &ev);
+
+    for (uint32_t retry_times = 0; retry_times < EPOLL_RETRY_TIMES; ) {
+        int n = epoll_wait(epfd, events, sizeof(events) / sizeof(events[0]), EPOLL_WAIT_TIMEOUT);
+        if (events[0].data.fd != socket_fd || !(events[0].events & EPOLLOUT)) {
+            continue;
+        }
+
+        // 为SIGPIPE注册处理函数；
+        // 当使用write()发送数据时，如果对方已经关闭了连接
+        // 那么write()会返回-1，并且errno会设置成EPIPE
+        // 这时需要处理这个错误，否则程序会退出并返回128 + SIGPIPE。
+        // 例如，用Ctrl + C退出服务端进程，会在客户端触发这个问题
+        // 但是如果截留该信号，也会使得下次send时的errno=EPIPE，上层一样需要处理抛出异常
+        signal(SIGPIPE, sigpipe_handler);
+
+        ssize_t len = send(socket_fd, buf, send_size, MSG_DONTWAIT);
+        if (len < 0) {
+            if (is_ignorable_error()) {
+                continue;
+            }
+            close(epfd);
+            throw TcpRuntimeException("send error", __FILENAME__, __LINE__);
+        }
+
+        if (len == 0) {
+            close(epfd);
+            throw TcpRuntimeException("send error: peer closed", __FILENAME__, __LINE__);
+        }
+
+        retry_times = 0;
+
+        // 只有发送长度小于剩余长度的时候，才做减法并继续循环
+        // 否则，视为发送完毕，返回
+        // 这样的写法是为了谨慎的预防无符号数回绕
+        if ((len < UINT16_MAX) && (len < (ssize_t)send_size)) {
+            send_size -= (uint16_t)len;
+            buf += len;
+        } else {
+            close(epfd);
+            return;
+        }
+    }
+
+    close(epfd);
     throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
 }

@@ -104,7 +104,7 @@ int main(int argc, char* argv[]) {
                 std::string packet = construct_message(message_content);
                 
                 // 发送报文
-                send_data_nonblock(client.get_fd(), packet.c_str(), static_cast<uint16_t>(packet.length()), 5);
+                send_data_nonblock(client.get_fd(), packet.c_str(), static_cast<uint16_t>(packet.length()));
                 
                 LOG_INFO("Message sent successfully, total length: %zu bytes", packet.length());
             } catch (const std::exception& e) {

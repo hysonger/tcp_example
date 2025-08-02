@@ -21,20 +21,19 @@ void TcpServer::accept_new_client(int32_t listen_fd)
 {
     int32_t new_socket = -1;
 
-    sockaddr_in client_address;
-    socklen_t client_address_size = sizeof(client_address);
+    sockaddr_in client_addr;
+    socklen_t client_address_size = sizeof(client_addr);
 
     // 当有多个连接接入时，需要循环处理
     // epoll中socket的模式是ET（边缘）触发时，必须在一次事件处理中**处理完全部的新输入**
     // 否则其他连接不会再继续触发事件，而会丢失
     for (uint32_t retry_times = 0; retry_times < MAX_ACCEPT_SIZE; ) {
         // 在接受新连接时，可以使用accept4而非accept，当场指定新连接的socket为非阻塞模式
-        new_socket = accept4(listen_fd, (sockaddr *)&client_address, &client_address_size, SOCK_NONBLOCK);
+        new_socket = accept(listen_fd, (sockaddr *)&client_addr, &client_address_size);
         if (new_socket < 0) {
             // 非阻塞accept下，返回-1并不一定是出错
             break;
         }
-
         /*
         // 否则，就需要使用fcntl手动修改为非阻塞模式
         int32_t rc = fcntl(new_socket, F_SETFL, O_NONBLOCK);
@@ -51,9 +50,7 @@ void TcpServer::accept_new_client(int32_t listen_fd)
             throw TcpRuntimeException("Failed to add new client to epoll", __FILENAME__, __LINE__);
         }
 
-        char peer_ip[INET_ADDRSTRLEN] = {0};
-        static_cast<void>(inet_ntop(AF_INET, &client_address.sin_addr, peer_ip, sizeof(peer_ip)));
-        LOG_INFO("New client connected from %s:%hu, fd is %d", peer_ip, ntohs(client_address.sin_port), new_socket);
+        this->deal_new_client(new_socket, client_addr);
     }
 
     // EAGAIN表示的是已无新连接，其他错误码若出现均为错误
@@ -77,18 +74,17 @@ void TcpServer::deal_client_msg(int32_t client_fd)
     try {
         constexpr uint32_t BUFFER_SIZE = UINT16_MAX + 1;
         constexpr uint32_t SIZE_OFFSET = sizeof(uint16_t);
-        constexpr uint32_t MAX_RETRY_TIMES = 5;
 
         LOG_INFO("Start to deal client %d message", client_fd);
 
         char buf[BUFFER_SIZE] = {0};
-        recv_data_nonblock(client_fd, buf, SIZE_OFFSET, MAX_RETRY_TIMES);
+        recv_data_nonblock(client_fd, buf, SIZE_OFFSET);
 
         uint16_t msg_size = ntohs(*(uint16_t *)buf);
         if (msg_size < SIZE_OFFSET) {
             throw TcpRuntimeException("The message size is invalid, msg_size=" + std::to_string(msg_size), __FILENAME__, __LINE__);
         }
-        recv_data_nonblock(client_fd, buf, msg_size - SIZE_OFFSET, MAX_RETRY_TIMES); // msg_size包含头长，要减去
+        recv_data_nonblock(client_fd, buf, msg_size - SIZE_OFFSET); // msg_size包含头长，要减去
 
         buf[msg_size] = '\0'; // msg_size的最大值为65535，缓冲区已留足长度
         LOG_INFO("The client %d message is %s", client_fd, buf);
@@ -96,6 +92,13 @@ void TcpServer::deal_client_msg(int32_t client_fd)
     catch (TcpRuntimeException& e) {
         RETHROW(e);
     }
+}
+
+void TcpServer::deal_new_client(int32_t client_fd, const sockaddr_in& client_addr)
+{
+    char peer_ip[INET_ADDRSTRLEN] = {0};
+    static_cast<void>(inet_ntop(AF_INET, &client_addr.sin_addr, peer_ip, sizeof(peer_ip)));
+    LOG_INFO("New client connected from %s:%hu, fd is %d", peer_ip, ntohs(client_addr.sin_port), client_fd);
 }
 
 TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
@@ -203,7 +206,7 @@ void TcpServer::listen_loop()
                 throw TcpRuntimeException("abnormal event, close socket, event: " + std::to_string(event[i].events), __FILENAME__, __LINE__);
             }
 
-            if (event[i].data.fd == listen_fd) {
+            if (event[i].data.fd == this->listen_fd) {
                 // 监听fd上的事件说明有新连接进入
                 this->accept_new_client(this->listen_fd);
             } else {

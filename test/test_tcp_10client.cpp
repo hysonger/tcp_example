@@ -11,12 +11,12 @@
 #include "tcp_client.hpp"
 
 // 自定义服务器类，实现deal_client_msg方法
-class TestTcpServer : public TcpServer {
+class TestTcpServer10Client : public TcpServer {
 private:
     std::atomic<int> message_count;
     
 public:
-    TestTcpServer(const std::string &listen_addr, uint16_t listen_port) 
+    TestTcpServer10Client(const std::string &listen_addr, uint16_t listen_port) 
         : TcpServer(listen_addr, listen_port), message_count(0) {}
     
     // 重写处理客户端消息的方法
@@ -25,7 +25,7 @@ public:
         constexpr static uint32_t SIZE_OFFSET = sizeof(uint16_t);
 
         char buf[BUFFER_SIZE] = {0};
-        recv_data_nonblock(client_fd, buf, SIZE_OFFSET, 5);
+        recv_data_nonblock(client_fd, buf, SIZE_OFFSET);
 
         uint16_t msg_size = ntohs(*(uint16_t *)buf);
         if (msg_size < SIZE_OFFSET) {
@@ -33,7 +33,7 @@ public:
             return;
         }
         
-        recv_data_nonblock(client_fd, buf, msg_size - SIZE_OFFSET, 5);
+        recv_data_nonblock(client_fd, buf, msg_size - SIZE_OFFSET);
         buf[msg_size] = '\0';
         
         message_count++;
@@ -48,7 +48,7 @@ public:
         memcpy(reply_buf.data() + SIZE_OFFSET, reply.c_str(), reply.length());
         
         try {
-            send_data_nonblock(client_fd, reply_buf.data(), reply.length() + SIZE_OFFSET, 5);
+            send_data_nonblock(client_fd, reply_buf.data(), reply.length() + SIZE_OFFSET);
         } catch (const TcpRuntimeException& e) {
             std::cerr << "Failed to send reply to client " << client_fd << ": " << e.what() << std::endl;
         }
@@ -86,7 +86,7 @@ void client_worker(int client_id, const std::string& server_addr, uint16_t serve
             memcpy(send_buf.data(), &msg_len, sizeof(uint16_t));
             memcpy(send_buf.data() + sizeof(uint16_t), message.c_str(), message.length());
             
-            send_data_nonblock(client.get_fd(), send_buf.data(), message.length() + sizeof(uint16_t), 5);
+            send_data_nonblock(client.get_fd(), send_buf.data(), message.length() + sizeof(uint16_t));
             
             // 等待服务器回复 (可选)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -100,7 +100,7 @@ void client_worker(int client_id, const std::string& server_addr, uint16_t serve
 }
 
 // 服务器工作线程函数
-void server_worker(TestTcpServer& server, std::atomic<bool>& running) {
+void server_worker(TestTcpServer10Client& server, std::atomic<bool>& running) {
     while (running) {
         try {
             server.listen_loop();
@@ -124,7 +124,7 @@ int test_tcp_10client() {
     
     try {
         // 创建服务器
-        TestTcpServer server(server_addr, server_port);
+        TestTcpServer10Client server(server_addr, server_port);
         std::cout << "Server started successfully" << std::endl;
         
         // 启动服务器线程
