@@ -10,7 +10,7 @@ class TcpClient {
 private:
     std::string server_addr;
     uint16_t server_port;
-    int32_t server_fd;
+    int32_t conn_fd;
 public:
     constexpr static uint32_t BUFFER_SIZE = UINT16_MAX + 1;
     constexpr static uint32_t MAX_RETRY_TIMES = 5;
@@ -19,6 +19,8 @@ public:
 
     TcpClient(const std::string& server_addr, uint16_t port);
     ~TcpClient();
+
+    int32_t get_fd() const;
     void send_data(const char *buf, uint16_t send_size);
 };
 

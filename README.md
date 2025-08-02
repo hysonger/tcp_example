@@ -9,8 +9,5 @@ GOAL:
 3. rewrite tcp_server.c using epoll OK
 4. rewrite tcp_server.c to cpp in class & exception style OK
 5. rewrite tcp_client.c to cpp, extracting common part to tcp_public OK
-6. adding client recv & server send capability
-7. decopling message parse & deal part
-8. message queue thread
-9. thread pool
-10. http server & client
+6. adding client recv & server send capability OK
+7. decopling message parse & deal part OK

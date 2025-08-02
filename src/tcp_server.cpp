@@ -86,8 +86,8 @@ void TcpServer::recv_data(int32_t client_fd, char *buf, uint16_t recv_size)
 
 void TcpServer::deal_client_msg(int32_t client_fd)
 {
-    constexpr static uint32_t BUFFER_SIZE = UINT16_MAX + 1;
-    constexpr static uint32_t SIZE_OFFSET = sizeof(uint16_t);
+    constexpr uint32_t BUFFER_SIZE = UINT16_MAX + 1;
+    constexpr uint32_t SIZE_OFFSET = sizeof(uint16_t);
 
     std::cout << "===> Start to deal client " + std::to_string(client_fd) + " message" << std::endl;
 
@@ -123,7 +123,8 @@ TcpServer::TcpServer(const std::string &listen_addr, uint16_t listen_port) :
     }
 
     // 打开SO_REUSEADDR，防止同地址socket无法再次绑定
-    // 该情况通常出现在socket由对端提出关闭，
+    // 该情况通常出现在socket由对端提出关闭，本端第三次挥手后进入TIME_WAIT状态
+    // 此时同一地址上又产生新连接，若不做该配置，则无法再次绑定
     int32_t optval = 1;
     int32_t rc = setsockopt(new_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
     if (rc < 0) {

@@ -51,20 +51,25 @@ TcpClient::TcpClient(const std::string& server_addr, uint16_t server_port) :
     }
 
     LOG_INFO("connected to %s:%hu\n", server_addr.c_str(), server_port);
-    this->server_fd = sockfd;
+    this->conn_fd = sockfd;
 }
 
 TcpClient::~TcpClient()
 {
-    close(this->server_fd); 
+    close(this->conn_fd); 
 }
 
 void TcpClient::send_data(const char *buf, uint16_t send_size)
 {
     try {
-        send_data_nonblock(this->server_fd, buf, send_size, MAX_RETRY_TIMES);
+        send_data_nonblock(this->conn_fd, buf, send_size, MAX_RETRY_TIMES);
     }
     catch (TcpRuntimeException& e) {
         RETHROW(e);
     }
+}
+
+int32_t TcpClient::get_fd() const
+{
+    return this->conn_fd;
 }

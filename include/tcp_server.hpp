@@ -11,6 +11,12 @@ extern "C" {
 
 #include "tcp_public.hpp"
 
+/*
+    支持epoll多路并发的TCP服务器类
+
+    构造函数中填入监听地址和端口，然后调用listen_loop()函数开始监听；
+    请覆盖deal_client_msg()函数，在该函数中进行数据读取（调用recv_data函数），以及随后的解析工作。
+*/
 class TcpServer {
 private:
     int32_t epoll_fd = -1;

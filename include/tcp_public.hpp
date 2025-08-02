@@ -36,7 +36,7 @@ void __format_log(FILE *stream, const std::string& message, ...);
 #define LOG_INFO(message, ...) __format_log(stdout, ((message)), ##__VA_ARGS__)
 #define LOG_ERR(message, ...) __format_log(stderr, ((message)), ##__VA_ARGS__)
 
-// 快速重抛异常的宏
+// 快速封装重抛异常的宏
 #define RETHROW(e) do {throw TcpRuntimeException(std::move(((e))), __FILENAME__, __LINE__); } while (0)
 
 std::string get_current_time();
