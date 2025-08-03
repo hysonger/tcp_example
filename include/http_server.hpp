@@ -38,7 +38,10 @@ private:
     std::filesystem::path validate_file(const std::string& target_path);
 
     std::string get_mime_type(const std::string& filepath);
-    
+
+    void handle_full_file_request(int32_t client_fd, const std::string& file_path);
+    void handle_request(HttpRequest& request);
+
     // 工作线程的核心处理函数
     void process_requests();
 public:

@@ -70,7 +70,7 @@ void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size)
         ssize_t len = recv(socket_fd, buf, recv_size, MSG_DONTWAIT); // 在recv时，也可独立地指定非阻塞接收
         if (len < 0) {
             if (is_ignorable_error()) {
-                retry_times++;
+                //retry_times++;
                 usleep(IO_WAIT_TIMEOUT);
                 continue;
             }
@@ -128,10 +128,12 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
                 LOG_INFO("retry times %u", retry_times);
                 continue;
             }
+            LOG_ERR("send error: %s", strerror(errno));
             throw TcpRuntimeException("send error: error cannot be ignored", __FILENAME__, __LINE__);
         }
 
         if (len == 0) {
+            LOG_ERR("send error: peer closed");
             throw TcpRuntimeException("send error: peer closed", __FILENAME__, __LINE__);
         }
 
@@ -147,27 +149,59 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
             return;
         }
     }
-
+    LOG_ERR("send_data_nonblock: send failed");
     throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
 }
 
-// 利用sendfile向socket发送一整个单文件；有更精细需求的不适用本函数
-void sendfile_single(int32_t socket_fd, const std::string& file_path)
+// 利用sendfile向socket发送文件；有更精细需求的不适用本函数
+void sendfile_nonblock(int32_t socket_fd, const std::string& file_path, off_t offset, off_t length)
 {
     int file_fd = open(file_path.c_str(), O_RDONLY);
     if (file_fd < 0) {
         throw TcpRuntimeException("Open file failed", __FILENAME__, __LINE__);
     }
 
-    struct stat st;
-    fstat(file_fd, &st);
-    ssize_t len = sendfile(socket_fd, file_fd, nullptr, st.st_size);
-    if (len != st.st_size) {
-        close(file_fd);
-        throw TcpRuntimeException("Send file failed, sendfile is incomplete", __FILENAME__, __LINE__);
+    off_t remaining = length;
+    
+    uint32_t retry_times = 0;
+    
+    while (remaining > 0 && retry_times < MAX_RETRY_TIMES) {
+        // 使用 sendfile 发送数据
+        ssize_t sent = sendfile(socket_fd, file_fd, &offset, remaining);
+        if (sent < 0) {
+            // 检查是否为可忽略的错误
+            if (is_ignorable_error()) {
+                //retry_times++;
+                usleep(IO_WAIT_TIMEOUT);
+                continue;
+            }
+            
+            close(file_fd);
+            LOG_ERR("Send file failed, errno=%d", errno);
+            throw TcpRuntimeException("Send file failed", __FILENAME__, __LINE__);
+        }
+        
+        if (sent == 0) {
+            // 没有更多数据可以发送，可能连接已关闭
+            LOG_ERR("Send file failed, peer closed");
+            break;
+        }
+        
+        // 重置重试次数
+        retry_times = 0;
+        
+        // 更新剩余字节数和偏移量
+        remaining -= sent;
+        //offset += sent;
+        LOG_DEBUG("Sent %d bytes, remaining %d bytes, offset %d", sent, remaining, offset);
     }
-
+    
     close(file_fd);
+    // 检查是否所有数据都已发送
+    if (remaining > 0) {
+        LOG_ERR("Send file failed, incomplete transfer");
+        throw TcpRuntimeException("Send file failed, incomplete transfer", __FILENAME__, __LINE__);
+    }
 }
 
 // 该函数主要为试验性质，通过epoll触发EPOLLOUT进而触发发送数据

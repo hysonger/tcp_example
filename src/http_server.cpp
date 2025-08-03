@@ -113,6 +113,47 @@ std::string HttpServer::get_mime_type(const std::string& filepath) {
     return "application/octet-stream"; // 默认二进制流
 }
 
+void HttpServer::handle_full_file_request(int32_t client_fd, const std::string& file_path) {
+    try {
+        // 构造完整文件路径并验证文件
+        std::string full_path = validate_file(file_path);
+        
+        // 获取文件状态
+        struct stat file_stat;
+        if (stat(full_path.c_str(), &file_stat) < 0 || S_ISDIR(file_stat.st_mode)) {
+            LOG_ERR("cannot access file: %s", full_path.c_str());
+            throw HttpRequestException("cannot access file", HTTP_ERR_NOT_FOUND);
+        }
+        std::string headers = 
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: " + get_mime_type(file_path) + "\r\n"
+            "Content-Length: " + std::to_string(file_stat.st_size) + "\r\n"
+            "Accept-Ranges: none\r\n"
+            "Cache-Control: public\r\n"
+            "Connection: keep-alive\r\n"
+            "\r\n";
+        
+        // 发送 HTTP 响应头
+        uint16_t header_size = static_cast<uint16_t>(headers.length());
+        send_data_nonblock(client_fd, headers.c_str(), header_size);
+        
+        // 使用 sendfile_nonblock 发送文件内容
+        sendfile_nonblock(client_fd, full_path, 0, file_stat.st_size);
+    } catch (HttpRequestException& e) {
+        LOG_ERR(e.get_err_resp());
+        send_data_nonblock(client_fd, e.get_err_resp().c_str(), e.get_err_resp().length());
+    } catch (TcpRuntimeException& e) {
+        LOG_ERR("sendfile_nonblock failed: %s", e.what());
+        return;
+    }
+}
+
+void HttpServer::handle_request(HttpRequest& request) { 
+    std::thread([this, request]() { 
+        handle_full_file_request(request.client_fd, request.filepath);
+    }).detach();
+}
+
 void HttpServer::process_requests() {
     while (!stop_flag.load()) {
         std::unique_lock<std::mutex> lock(queue_mutex);
@@ -132,33 +173,7 @@ void HttpServer::process_requests() {
         lock.unlock();
         
         try {
-            // 构造完整文件路径
-            std::string full_path = validate_file(request.filepath);
-            
-            // 获取文件状态
-            struct stat file_stat;
-            if (stat(full_path.c_str(), &file_stat) < 0 || S_ISDIR(file_stat.st_mode)) {
-                LOG_ERR("cannot access file: %s", full_path.c_str());
-                throw HttpRequestException("cannot access file", HTTP_ERR_NOT_FOUND);
-            }
-            
-            // 获取 MIME 类型
-            std::string mime_type = get_mime_type(request.filepath);
-
-            // 完整文件传输
-            std::string headers = 
-                "HTTP/1.1 200 OK\r\n"
-                "Content-Type: " + mime_type + "\r\n"
-                "Content-Length: " + std::to_string(file_stat.st_size) + "\r\n"
-                "Connection: close\r\n"
-                "\r\n";
-            
-            // 发送 HTTP 响应头
-            uint16_t header_size = static_cast<uint16_t>(headers.length());
-            send_data_nonblock(request.client_fd, headers.c_str(), header_size);
-            
-            // 使用 sendfile_single 发送文件内容
-            sendfile_single(request.client_fd, full_path);
+            handle_request(request);
         } catch (const HttpRequestException& e) {
             // 发送错误信息
             std::string err_resp = e.get_err_resp();
