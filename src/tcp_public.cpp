@@ -39,7 +39,7 @@ void __format_log(FILE *stream, const std::string& message, const char *file_nam
 }
 
 // 非阻塞I/O中，可以忽略的三种错误码
-inline bool is_ignorable_error()
+bool is_ignorable_error()
 {
     return (errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR);
 }
@@ -55,7 +55,8 @@ void sigpipe_handler(int sig)
 /**
  * @brief 非阻塞方式接收数据
  * 
- * 该函数通过非阻塞方式从指定socket接收数据，支持重试机制和部分发送处理
+ * 该函数通过非阻塞方式从指定socket接收数据
+ * 适用于数据量小且长度已知，需要保证数据传达的场景
  * 
  * @param socket_fd 文件描述符，用于标识要发送接收数据的套接字
  * @param buf 指向要接收数据的缓冲区指针
@@ -70,15 +71,17 @@ void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size)
         ssize_t len = recv(socket_fd, buf, recv_size, MSG_DONTWAIT); // 在recv时，也可独立地指定非阻塞接收
         if (len < 0) {
             if (is_ignorable_error()) {
-                //retry_times++;
+                retry_times++;
                 usleep(IO_WAIT_TIMEOUT);
                 continue;
             }
-            throw TcpRuntimeException("recv error: error cannot be ignored", __FILENAME__, __LINE__);
+            LOG_ERR("recv error: %s", strerror(errno));
+            return;
         }
 
         if (len == 0) {
-            throw TcpRuntimeException("recv error: peer closed", __FILENAME__, __LINE__);
+            LOG_ERR("recv error: peer closed");
+            return;
         }
 
         retry_times = 0;
@@ -94,13 +97,14 @@ void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size)
         }
     }
 
-    throw TcpRuntimeException("Failed to recv data, Reached max retries", __FILENAME__, __LINE__);
+    LOG_ERR("Failed to recv data, Reached max retries, remaining data size: %u", recv_size);
 }
 
 /**
  * @brief 非阻塞方式发送数据
  * 
- * 该函数通过非阻塞方式向指定文件描述符发送数据，支持重试机制和部分发送处理
+ * 该函数通过非阻塞方式向指定文件描述符发送数据，
+ * 适用于数据量小且长度已知，需要保证数据传达的场景
  * 
  * @param socket_fd 文件描述符，用于标识要发送数据的套接字
  * @param buf 指向要发送数据的缓冲区指针
@@ -128,13 +132,14 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
                 LOG_INFO("retry times %u", retry_times);
                 continue;
             }
+
             LOG_ERR("send error: %s", strerror(errno));
-            throw TcpRuntimeException("send error: error cannot be ignored", __FILENAME__, __LINE__);
+            return;
         }
 
         if (len == 0) {
             LOG_ERR("send error: peer closed");
-            throw TcpRuntimeException("send error: peer closed", __FILENAME__, __LINE__);
+            return;
         }
 
         retry_times = 0;
@@ -149,8 +154,51 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
             return;
         }
     }
-    LOG_ERR("send_data_nonblock: send failed");
-    throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
+    
+    LOG_ERR("Failed to recv data, Reached max retries, remaining data size: %u", send_size);
+}
+
+std::string recv_with_eof(int32_t socket_fd, size_t max_size, const std::string& eof_str)
+{
+    bool found_eof = false;
+    size_t total_received = 0;
+    char *buf = static_cast<char *>(malloc(max_size + 1));
+    
+    while (!found_eof && total_received < max_size) {
+        // 逐字节读取，直到找到头部结束符
+        ssize_t len = recv(socket_fd, buf + total_received, eof_str.length(), MSG_DONTWAIT);
+        if (len < 0 && !is_ignorable_error()) {
+            LOG_ERR("recv failed, errno=%d", errno);
+            break;
+        }
+
+        if (len == 0) {
+            LOG_ERR("recv failed, peer closed");
+            break;
+        }
+
+        if (len > 0) {
+            total_received += (size_t)len;
+        }
+        
+        // 检查是否收到结束符
+        if (total_received >= eof_str.length() &&
+            strncmp(buf + total_received - eof_str.length(), eof_str.c_str(), eof_str.length()) == 0) {
+            found_eof = true;
+            break;
+        }
+    }
+
+    buf[total_received] = '\0';
+    std::string result(buf);
+    free(buf);
+
+    if (!found_eof) {
+        LOG_ERR("there is no eof str! ");
+        throw TcpRuntimeException("there is no eof str! ", __FILENAME__, __LINE__);
+    }
+
+    return result;
 }
 
 // 利用sendfile向socket发送文件；有更精细需求的不适用本函数
@@ -192,7 +240,7 @@ void sendfile_nonblock(int32_t socket_fd, const std::string& file_path, off_t of
         
         // 更新剩余字节数和偏移量
         remaining -= sent;
-        //offset += sent;
+        //offset += sent; // !!!sendfile的offset若传入则为出入两用参数，会自动前移，无需自行累加！！！
         LOG_DEBUG("Sent %d bytes, remaining %d bytes, offset %d", sent, remaining, offset);
     }
     

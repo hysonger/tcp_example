@@ -45,28 +45,6 @@ std::filesystem::path HttpServer::validate_file(const std::string& target_path) 
 
 HttpServer::HttpServer(const std::string &listen_addr, uint16_t listen_port, const std::string& web_root) 
     : TcpServer(listen_addr, listen_port), web_root(web_root) {
-    
-    // 初始化 MIME 类型映射
-    mime_types[".html"] = "text/html";
-    mime_types[".htm"] = "text/html";
-    mime_types[".css"] = "text/css";
-    mime_types[".js"] = "application/javascript";
-    mime_types[".jpg"] = "image/jpeg";
-    mime_types[".jpeg"] = "image/jpeg";
-    mime_types[".png"] = "image/png";
-    mime_types[".gif"] = "image/gif";
-    mime_types[".ico"] = "image/x-icon";
-    mime_types[".mp4"] = "video/mp4";
-    mime_types[".webm"] = "video/webm";
-    mime_types[".ogg"] = "video/ogg";
-    mime_types[".avi"] = "video/x-msvideo";
-    mime_types[".mov"] = "video/quicktime";
-    mime_types[".wmv"] = "video/x-ms-wmv";
-    mime_types[".flv"] = "video/x-flv";
-    mime_types[".mkv"] = "video/x-matroska";
-    mime_types[".m3u8"] = "application/vnd.apple.mpegurl";
-    mime_types[".ts"] = "video/mp2t";
-
     // 校验web根目录是否存在
     if (!std::filesystem::exists(web_root) || !std::filesystem::is_directory(web_root)) {
         throw std::runtime_error("web_root is not a valid directory");
@@ -101,6 +79,30 @@ void HttpServer::deal_new_client(int32_t client_fd, const sockaddr_in& client_ad
 }
 
 std::string HttpServer::get_mime_type(const std::string& filepath) {
+    static std::unordered_map<std::string, std::string> mime_types = {
+        {".html", "text/html"},
+        {".css", "text/css"},
+        {".js", "application/javascript"},
+        {".png", "image/png"},
+        {".jpg", "image/jpeg"},
+        {".gif", "image/gif"},
+        {".ico", "image/x-icon"},
+        {".svg", "image/svg+xml"},
+        {".json", "application/json"},
+        {".xml", "application/xml"},
+        {".pdf", "application/pdf"},
+        {".zip", "application/zip"},
+        {".mp4", "video/mp4"},
+        {".mkv", "video/x-matroska"},
+        {".mpeg", "video/mpeg"},
+        {".avi", "video/x-msvideo"},
+        {".webm", "video/webm"},
+        {".mp3", "audio/mpeg"},
+        {".wav", "audio/wav"},
+        {".txt", "text/plain"},
+        {".flac", "audio/flac"},
+    };
+
     // 从文件路径获取文件扩展名
     size_t dot_pos = filepath.find_last_of('.');
     if (dot_pos != std::string::npos) {
@@ -113,6 +115,7 @@ std::string HttpServer::get_mime_type(const std::string& filepath) {
     return "application/octet-stream"; // 默认二进制流
 }
 
+// 处理整个文件的数据请求
 void HttpServer::handle_full_file_request(int32_t client_fd, const std::string& file_path) {
     try {
         // 构造完整文件路径并验证文件
@@ -128,7 +131,6 @@ void HttpServer::handle_full_file_request(int32_t client_fd, const std::string& 
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: " + get_mime_type(file_path) + "\r\n"
             "Content-Length: " + std::to_string(file_stat.st_size) + "\r\n"
-            "Accept-Ranges: none\r\n"
             "Cache-Control: public\r\n"
             "Connection: keep-alive\r\n"
             "\r\n";
@@ -190,35 +192,11 @@ void HttpServer::process_requests() {
 
 void HttpServer::deal_client_msg(int32_t client_fd) {
     try {
-        constexpr uint32_t BUFFER_SIZE = UINT16_MAX + 1;
-        char buf[BUFFER_SIZE] = {0};
-        
         // 循环读取数据直到找到HTTP头部结束符 \r\n\r\n
-        std::string request_data;
-        bool header_complete = false;
-        size_t total_received = 0;
-        
-        while (!header_complete && total_received < BUFFER_SIZE - 1) {
-            // 逐字节读取，直到找到头部结束符
-            recv_data_nonblock(client_fd, buf + total_received, 1);
-            total_received++;
-            
-            // 检查是否收到完整的HTTP头部
-            if (total_received >= 4 && 
-                strcmp(buf + total_received - 4, "\r\n\r\n") == 0) {
-                header_complete = true;
-                break;
-            }
-        }
-        
-        buf[total_received] = '\0';
-        if (!header_complete) {
-            LOG_ERR("Header is incomplete! received %d bytes: %s", total_received, buf);
-            throw HttpRequestException("Header is incomplete!", 400);
-        }
+        std::string request_data = recv_with_eof(client_fd, UINT16_MAX, "\r\n\r\n");
 
-        LOG_DEBUG("Received request: %s", buf);
-        HttpRequest request(client_fd, std::string(buf));
+        LOG_DEBUG("Received request: %s", request_data.c_str());
+        HttpRequest request(client_fd, request_data);
         
         // 将文件传输请求交给工作线程处理（包含 Range 信息）
         {

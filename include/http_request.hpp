@@ -13,6 +13,18 @@ enum HttpErrCode {
     HTTP_ERR_INTERNAL_SERVER_ERROR = 500,
 };
 
+enum HttpRequestType {
+    HTTP_REQUEST_GET,
+    HTTP_REQUEST_HEAD,
+    HTTP_REQUEST_POST,
+    HTTP_REQUEST_PUT,
+    HTTP_REQUEST_DELETE,
+    HTTP_REQUEST_OPTIONS,
+    HTTP_REQUEST_TRACE,
+    HTTP_REQUEST_CONNECT,
+    HTTP_REQUEST_PATCH,
+};
+
 // 表示一个Range范围的结构体
 struct HttpRange {
     off_t start;  // 起始字节位置
@@ -40,10 +52,12 @@ protected:
     static std::string extract_path(const std::string &req);
 public:
     int32_t client_fd;
+
+    HttpRequestType type; // 请求类型
     std::string filepath; // 文件路径，此时尚未规格化，需要消息处理逻辑进行进一步处理
 
-    std::string range_header; // Range请求数据
     bool is_range_request; // 是否为Range请求
+    std::string range_header; // Range请求数据
 
     std::vector<HttpRange> get_ranges(off_t file_size);
     HttpRequest(int32_t fd, const std::string& request_data);

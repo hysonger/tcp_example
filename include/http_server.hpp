@@ -23,7 +23,6 @@
 class HttpServer : public TcpServer {
 private:
     std::filesystem::path web_root; // 网站根目录
-    std::unordered_map<std::string, std::string> mime_types;
     
     // 工作线程相关数据结构
     std::atomic<bool> stop_flag{false};

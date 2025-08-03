@@ -65,7 +65,7 @@ std::string HttpRequest::extract_path(const std::string &req)
     throw HttpRequestException("Invalid HTTP request path", 400);
 }
 
-// 解析Range头部
+// 解析Range头部的字符串为HttpRange结构体数组
 std::vector<HttpRange> HttpRequest::get_ranges(off_t file_size) {
     std::vector<HttpRange> ranges;
     
