@@ -1,11 +1,18 @@
 A simple TCP & HTTP protocol server & client demostration, supporting multi I/O with epoll
+-------------------------------------------------
 
-The core implementation is in TcpServer & TcpClient classes.
+It's my personal exercise.
+
+The core implementation is in TcpServer & TcpClient classes. recv/send functions are independent from them.
+
 Most of I/O operations are in nonblock mode. (But it's so hard to write! I dont think it's a good idea to write all I/O operations in nonblock mode. It depends on the actual situation.)
-Any application can inherit from TcpServer and rewrite certain methods to implement its own protocol.
+
+Any application can inherit from TcpServer and **rewrite certain methods** to implement its own protocol.
+
 HttpServer inherits from TcpServer for example. It reads files from html/ and deliver them to client with sendfile().
 
 TcpServer default Message format:
+
 msg_len(2 bytes, max num 65535, network sequence, including msg_len itself) | msg_body
 
 GOAL:
