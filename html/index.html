@@ -1,1 +1,39 @@
-Hello World!
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .content {
+            text-align: center;
+        }
+        .content img {
+            width: 25vw; /* 设置图片宽度为视口宽度的25%，即四分之一 */
+            max-width: 100%; /* 确保图片不会超出其容器 */
+            height: auto; /* 保持图片的宽高比 */
+        }
+        .hello-text {
+            font-weight: bold;
+            font-size: 24px;
+            margin-top: 20px;
+            font-family: 'Courier New', Courier, monospace; /* 使用等宽字体 */
+        }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <img src="test.png" alt="Test Image">
+        <div class="hello-text">Hello World!</div>
+    </div>
+</body>
+</html>

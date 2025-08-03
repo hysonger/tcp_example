@@ -23,7 +23,6 @@ int main() {
         HttpServer server("127.0.0.1", 8080, "./html");
         g_server = &server;
         
-        LOG_INFO("HTTP server started on 127.0.0.1:8080, serving files from ./html");
         LOG_INFO("Press Ctrl+C to stop the server");
         
         // 进入事件循环

@@ -201,6 +201,7 @@ void TcpServer::listen_loop()
         try {
             // 先检查是否是错误事件
             if (event[i].events & EPOLLRDHUP) {
+                // EPOLLRDHUP 表示对端关闭了连接，不算做错误
                 this->close_client(event[i].data.fd);
                 LOG_INFO("Client %d is closed", event[i].data.fd);
                 continue;

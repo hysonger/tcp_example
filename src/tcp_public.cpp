@@ -28,10 +28,10 @@ std::string get_current_time()
     return std::string(buf);
 }
 
-void __format_log(FILE *stream, const std::string& message, ...) {
+void __format_log(FILE *stream, const std::string& message, const char *file_name, uint32_t line_number, ...) {
     va_list args;
-    va_start(args, message);
-    fprintf(stream, "===> [%s] ", get_current_time().c_str());
+    va_start(args, line_number);
+    fprintf(stream, "===> [%s][%s:%u] ", get_current_time().c_str(), file_name, line_number);
     vfprintf(stream, message.c_str(), args);
     va_end(args);
     fprintf(stream, "\n");
@@ -151,18 +151,10 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
     throw TcpRuntimeException("Failed to send data, reached max retries", __FILENAME__, __LINE__);
 }
 
-void sendfile_nonblock(int32_t socket_fd, const std::string& file_path)
+// 利用sendfile向socket发送一整个单文件；有更精细需求的不适用本函数
+void sendfile_single(int32_t socket_fd, const std::string& file_path)
 {
-    // 首先对路径进行转义
-    std::string real_path = realpath(file_path.c_str(), nullptr);
-    
-    // 限制只能在当前目录下发送文件
-    std::string curr_path = getcwd(nullptr, 0);
-    if (real_path.find(curr_path) != 0) {
-        throw TcpRuntimeException("File path is not in current directory", __FILENAME__, __LINE__);
-    }
-
-    int file_fd = open(real_path.c_str(), O_RDONLY);
+    int file_fd = open(file_path.c_str(), O_RDONLY);
     if (file_fd < 0) {
         throw TcpRuntimeException("Open file failed", __FILENAME__, __LINE__);
     }
@@ -171,8 +163,11 @@ void sendfile_nonblock(int32_t socket_fd, const std::string& file_path)
     fstat(file_fd, &st);
     ssize_t len = sendfile(socket_fd, file_fd, nullptr, st.st_size);
     if (len != st.st_size) {
+        close(file_fd);
         throw TcpRuntimeException("Send file failed, sendfile is incomplete", __FILENAME__, __LINE__);
     }
+
+    close(file_fd);
 }
 
 // 该函数主要为试验性质，通过epoll触发EPOLLOUT进而触发发送数据

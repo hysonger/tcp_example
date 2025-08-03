@@ -1,10 +1,47 @@
 // http_server.cpp
-#include "http_server.hpp"
+extern "C" {
 #include <sys/stat.h>
 #include <unistd.h>
-#include <regex>
-#include <fstream>
-#include <sstream>
+#include <fcntl.h>
+#include <sys/sendfile.h>
+}
+
+#include <filesystem>
+
+#include "http_server.hpp"
+
+std::filesystem::path HttpServer::validate_file(const std::string& target_path) {
+    // 构造目标文件的绝对路径
+    std::filesystem::path abs_target_path;
+    
+    abs_target_path = web_root.string() + target_path;
+    LOG_DEBUG("abs_target_path: %s", abs_target_path.string().c_str());
+    
+    // 规范化路径（解析 .. 和 .）
+    std::filesystem::path normalized_path = std::filesystem::weakly_canonical(abs_target_path);
+    std::filesystem::path normalized_web_root = std::filesystem::weakly_canonical(web_root);
+    
+    // 检查规范化后的路径是否以web_root开头
+    auto web_root_str = normalized_web_root.string();
+    auto target_str = normalized_path.string();
+    
+    // 确保web_root路径以路径分隔符结尾，防止部分匹配
+    if (web_root_str.back() != std::filesystem::path::preferred_separator) {
+        web_root_str += std::filesystem::path::preferred_separator;
+    }
+    
+    // 检查目标路径是否在web_root内
+    if (target_str.find(web_root_str) != 0) {
+        throw HttpRequestException("path is invalid", HTTP_ERR_FORBIDDEN);
+    }
+
+    // 检查文件是否存在且可读
+    if (access(target_str.c_str(), R_OK) != 0) {
+        throw HttpRequestException("cannot access file", HTTP_ERR_NOT_FOUND);
+    }
+    
+    return normalized_path;
+}
 
 HttpServer::HttpServer(const std::string &listen_addr, uint16_t listen_port, const std::string& web_root) 
     : TcpServer(listen_addr, listen_port), web_root(web_root) {
@@ -29,11 +66,18 @@ HttpServer::HttpServer(const std::string &listen_addr, uint16_t listen_port, con
     mime_types[".mkv"] = "video/x-matroska";
     mime_types[".m3u8"] = "application/vnd.apple.mpegurl";
     mime_types[".ts"] = "video/mp2t";
+
+    // 校验web根目录是否存在
+    if (!std::filesystem::exists(web_root) || !std::filesystem::is_directory(web_root)) {
+        throw std::runtime_error("web_root is not a valid directory");
+    }
     
     // 启动工作线程
     for (size_t i = 0; i < MAX_WORKER_THREADS; ++i) {
-        worker_threads.emplace_back(&HttpServer::process_file_requests, this);
+        worker_threads.emplace_back(&HttpServer::process_requests, this);
     }
+
+    LOG_INFO("HTTP server started on %s:%hu, serving files from %s", listen_addr.c_str(), listen_port, web_root.c_str());
 }
 
 HttpServer::~HttpServer() {
@@ -69,50 +113,7 @@ std::string HttpServer::get_mime_type(const std::string& filepath) {
     return "application/octet-stream"; // 默认二进制流
 }
 
-std::string HttpServer::extract_path(const char* request) {
-    // 使用正则表达式提取 HTTP 请求路径
-    std::string req(request);
-    std::regex request_pattern(R"(GET\s+(.*?)\s+HTTP/1\.[01])");
-    std::smatch match;
-    
-    if (std::regex_search(req, match, request_pattern)) {
-        std::string path = match[1].str();
-        if (path.empty() || path == "/") {
-            path = "/index.html"; // 默认页面
-        }
-        return path;
-    }
-    
-    return ""; // 无效请求
-}
-
-std::string HttpServer::generate_error_response(int error_code, const std::string& message) {
-    std::string html = 
-        "<html>"
-        "<head><title>" + std::to_string(error_code) + " " + message + "</title></head>"
-        "<body><h1>" + std::to_string(error_code) + " " + message + "</h1></body>"
-        "</html>";
-    
-    std::string response = 
-        "HTTP/1.1 " + std::to_string(error_code) + " " + message + "\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: " + std::to_string(html.length()) + "\r\n"
-        "Connection: close\r\n"
-        "\r\n" + html;
-    
-    return response;
-}
-
-void HttpServer::send_http_response_threaded(int32_t client_fd, const std::string& filepath) {
-    // 将请求添加到队列中，由工作线程处理
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex);
-        request_queue.emplace(client_fd, filepath);
-    }
-    queue_cv.notify_one();
-}
-
-void HttpServer::process_file_requests() {
+void HttpServer::process_requests() {
     while (!stop_flag.load()) {
         std::unique_lock<std::mutex> lock(queue_mutex);
         queue_cv.wait(lock, [this] { return !request_queue.empty() || stop_flag.load(); });
@@ -126,38 +127,29 @@ void HttpServer::process_file_requests() {
         }
         
         // 获取请求
-        ClientRequest request = request_queue.front();
+        HttpRequest request = request_queue.front();
         request_queue.pop();
         lock.unlock();
         
         try {
             // 构造完整文件路径
-            std::string full_path = web_root + request.filepath;
-            
-            // 检查文件是否存在且可读
-            if (access(full_path.c_str(), R_OK) != 0) {
-                std::string error_response = generate_error_response(404, "Not Found");
-                uint16_t response_size = static_cast<uint16_t>(error_response.length());
-                send_data_nonblock(request.client_fd, error_response.c_str(), response_size);
-                continue;
-            }
+            std::string full_path = validate_file(request.filepath);
             
             // 获取文件状态
             struct stat file_stat;
             if (stat(full_path.c_str(), &file_stat) < 0 || S_ISDIR(file_stat.st_mode)) {
-                std::string error_response = generate_error_response(404, "Not Found");
-                uint16_t response_size = static_cast<uint16_t>(error_response.length());
-                send_data_nonblock(request.client_fd, error_response.c_str(), response_size);
-                continue;
+                LOG_ERR("cannot access file: %s", full_path.c_str());
+                throw HttpRequestException("cannot access file", HTTP_ERR_NOT_FOUND);
             }
             
-            // 构造 HTTP 响应头（支持Range请求）
+            // 获取 MIME 类型
             std::string mime_type = get_mime_type(request.filepath);
+
+            // 完整文件传输
             std::string headers = 
                 "HTTP/1.1 200 OK\r\n"
                 "Content-Type: " + mime_type + "\r\n"
                 "Content-Length: " + std::to_string(file_stat.st_size) + "\r\n"
-                "Accept-Ranges: bytes\r\n"
                 "Connection: close\r\n"
                 "\r\n";
             
@@ -165,13 +157,18 @@ void HttpServer::process_file_requests() {
             uint16_t header_size = static_cast<uint16_t>(headers.length());
             send_data_nonblock(request.client_fd, headers.c_str(), header_size);
             
-            // 使用 sendfile_nonblock 发送文件内容
-            sendfile_nonblock(request.client_fd, full_path);
-            
+            // 使用 sendfile_single 发送文件内容
+            sendfile_single(request.client_fd, full_path);
+        } catch (const HttpRequestException& e) {
+            // 发送错误信息
+            std::string err_resp = e.get_err_resp();
+            uint16_t err_size = static_cast<uint16_t>(err_resp.length());
+            send_data_nonblock(request.client_fd, err_resp.c_str(), err_size);
         } catch (const TcpRuntimeException& e) {
-            LOG_ERR("Error processing file request: %s", e.what());
-        } catch (...) {
-            LOG_ERR("Unknown error processing file request");
+            std::string error_response = HttpRequestException("while sending file", HTTP_ERR_INTERNAL_SERVER_ERROR)
+                .get_err_resp();
+            uint16_t response_size = static_cast<uint16_t>(error_response.length());
+            send_data_nonblock(request.client_fd, error_response.c_str(), response_size);
         }
     }
 }
@@ -191,40 +188,38 @@ void HttpServer::deal_client_msg(int32_t client_fd) {
             recv_data_nonblock(client_fd, buf + total_received, 1);
             total_received++;
             
-            request_data.assign(buf, total_received);
-            
             // 检查是否收到完整的HTTP头部
             if (total_received >= 4 && 
-                request_data.substr(total_received - 4, 4) == "\r\n\r\n") {
+                strcmp(buf + total_received - 4, "\r\n\r\n") == 0) {
                 header_complete = true;
                 break;
             }
         }
         
-        if (!header_complete) {
-            std::string error_response = generate_error_response(400, "Bad Request");
-            uint16_t response_size = static_cast<uint16_t>(error_response.length());
-            send_data_nonblock(client_fd, error_response.c_str(), response_size);
-            return;
-        }
-        
         buf[total_received] = '\0';
-        
-        // 提取请求路径
-        std::string path = extract_path(buf);
-        if (path.empty()) {
-            std::string error_response = generate_error_response(400, "Bad Request");
-            uint16_t response_size = static_cast<uint16_t>(error_response.length());
-            send_data_nonblock(client_fd, error_response.c_str(), response_size);
-            return;
+        if (!header_complete) {
+            LOG_ERR("Header is incomplete! received %d bytes: %s", total_received, buf);
+            throw HttpRequestException("Header is incomplete!", 400);
         }
+
+        LOG_DEBUG("Received request: %s", buf);
+        HttpRequest request(client_fd, std::string(buf));
         
-        LOG_INFO("HTTP request for: %s", path.c_str());
+        // 将文件传输请求交给工作线程处理（包含 Range 信息）
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex);
+            request_queue.emplace(request);
+        }
+        queue_cv.notify_one();
         
-        // 将文件传输请求交给工作线程处理
-        send_http_response_threaded(client_fd, path);
-        
+    } catch (HttpRequestException& e) {
+        std::string error_response = e.get_err_resp();
+        uint16_t response_size = static_cast<uint16_t>(error_response.length());
+        send_data_nonblock(client_fd, error_response.c_str(), response_size);
     } catch (TcpRuntimeException& e) {
-        RETHROW(e);
+        std::string error_response = HttpRequestException("while parsing request: " + std::string(e.what()),
+            HTTP_ERR_INTERNAL_SERVER_ERROR).get_err_resp();
+        uint16_t response_size = static_cast<uint16_t>(error_response.length());
+        send_data_nonblock(client_fd, error_response.c_str(), response_size);
     }
 }

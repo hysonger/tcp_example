@@ -27,21 +27,31 @@ public:
 
 // === EXCEPTION END ===
 
-void __format_log(FILE *stream, const std::string& message, ...);
+void __format_log(FILE *stream, const std::string& message, const char *file_name, uint32_t line_number, ...);
 
 #define __FILENAME__ (((strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)))
 
 // TIPS: 使用宏的可变参数时，##使得可选参数可以被省略
 
-#define LOG_INFO(message, ...) __format_log(stdout, ((message)), ##__VA_ARGS__)
-#define LOG_ERR(message, ...) __format_log(stderr, ((message)), ##__VA_ARGS__)
+// 打印日志，不受调试宏影响，输出到标准输出；注意该函数为C风格，除首个参数外，输入字符串请以.c_str()传入
+#define LOG_INFO(message, ...) __format_log(stdout, ((message)), __FILENAME__, __LINE__, ##__VA_ARGS__)
+
+// 错误日志，不受调试宏影响，输出到标准错误；注意该函数为C风格，除首个参数外，输入字符串请以.c_str()传入
+#define LOG_ERR(message, ...) __format_log(stderr, ((message)), __FILENAME__, __LINE__, ##__VA_ARGS__)
+
+#ifndef NDEBUG
+// 调试日志，受调试宏影响，调试模式下输出到标准输出；注意该函数为C风格，除首个参数外，输入字符串请以.c_str()传入
+#define LOG_DEBUG(message, ...) __format_log(stdout, ((message)), __FILENAME__, __LINE__, ##__VA_ARGS__)
+#else
+#define LOG_DEBUG(message, ...) (void)0
+#endif
 
 // 快速封装重抛异常的宏
 #define RETHROW(e) do {throw TcpRuntimeException(std::move(((e))), __FILENAME__, __LINE__); } while (0)
 
 std::string get_current_time();
 
-void sendfile_nonblock(int32_t socket_fd, const std::string& file_path);
+void sendfile_single(int32_t socket_fd, const std::string& file_path);
 
 void recv_data_nonblock(int32_t socket_fd, char *buf, uint16_t recv_size);
 void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size);
