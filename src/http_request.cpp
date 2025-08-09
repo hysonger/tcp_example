@@ -65,8 +65,9 @@ std::string HttpRequest::extract_path(const std::string &req)
     throw HttpRequestException("Invalid HTTP request path", 400);
 }
 
-// 解析Range头部的字符串为HttpRange结构体数组
-std::vector<HttpRange> HttpRequest::get_ranges(off_t file_size) {
+// 解析Range头部的字符串为HttpRange结构体数组，需要提供文件大小
+std::vector<HttpRange> HttpRequest::parse_ranges(off_t file_size)
+{
     std::vector<HttpRange> ranges;
     
     // 检查是否以"bytes="开头
@@ -135,10 +136,9 @@ std::vector<HttpRange> HttpRequest::get_ranges(off_t file_size) {
     return ranges;
 }
 
-HttpRequest::HttpRequest(int32_t fd, const std::string& request_data) : client_fd(fd), is_range_request(false) {
-    this->filepath = HttpRequest::extract_path(request_data);
-    LOG_INFO("HTTP request for: %s", this->filepath.c_str());
-    
+// 提取Range头部字符串
+void HttpRequest::parse_range_header(const std::string& request_data)
+{
     // 解析Range头部
     std::regex range_pattern(R"(Range:\s*(.+?)\r\n)", std::regex_constants::icase);
     std::smatch range_match;
@@ -150,4 +150,12 @@ HttpRequest::HttpRequest(int32_t fd, const std::string& request_data) : client_f
         this->is_range_request = true;
         LOG_DEBUG("Range request detected: %s", range_header.c_str());
     }
+}
+
+HttpRequest::HttpRequest(int32_t fd, const std::string& request_data) : client_fd(fd), is_range_request(false)
+{
+    this->filepath = HttpRequest::extract_path(request_data);
+    LOG_INFO("HTTP request for: %s", this->filepath.c_str());
+    
+    this->parse_range_header(request_data);
 }

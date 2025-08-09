@@ -50,6 +50,7 @@ public:
 class HttpRequest {
 protected:
     static std::string extract_path(const std::string &req);
+    void parse_range_header(const std::string& request_data);
 public:
     int32_t client_fd;
 
@@ -59,7 +60,7 @@ public:
     bool is_range_request; // 是否为Range请求
     std::string range_header; // Range请求数据
 
-    std::vector<HttpRange> get_ranges(off_t file_size);
+    std::vector<HttpRange> parse_ranges(off_t file_size);
     HttpRequest(int32_t fd, const std::string& request_data);
 };
 

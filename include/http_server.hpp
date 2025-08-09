@@ -32,16 +32,15 @@ private:
     std::condition_variable queue_cv;
     static constexpr size_t MAX_WORKER_THREADS = 4;
 
-    // 验证访问路径，如果访问路径合法，返回完整转义后的文件路径
-    // @exception 路径不合法时抛出HttpRequestException
     std::filesystem::path validate_file(const std::string& target_path);
-
     std::string get_mime_type(const std::string& filepath);
 
-    void handle_full_file_request(int32_t client_fd, const std::string& file_path);
-    void handle_request(HttpRequest& request);
+    void reply_error(int32_t client_fd, const HttpRequestException& e) noexcept;
 
-    // 工作线程的核心处理函数
+    void handle_range_request(HttpRequest&& request);
+    void handle_full_file_request(HttpRequest&& request);
+    void handle_request(HttpRequest&& request);
+
     void process_requests();
 public:
     HttpServer(const std::string &listen_addr, uint16_t listen_port, const std::string& web_root = "./html");
