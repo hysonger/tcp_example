@@ -122,9 +122,10 @@ void send_data_nonblock(int32_t socket_fd, const char *buf, uint16_t send_size)
         // 这时需要处理这个错误，否则程序会退出并返回128 + SIGPIPE。
         // 例如，用Ctrl + C退出服务端进程，会在客户端触发这个问题
         // 但是如果截留该信号，也会使得下次send时的errno=EPIPE，上层一样需要处理抛出异常
-        signal(SIGPIPE, sigpipe_handler);
-
-        ssize_t len = send(socket_fd, buf, send_size, MSG_DONTWAIT);
+        //signal(SIGPIPE, sigpipe_handler);
+        
+        // send时，可指定非阻塞，且禁止send向系统发送异常信号，即可预防SIGPIPE使进程崩溃
+        ssize_t len = send(socket_fd, buf, send_size, MSG_DONTWAIT | MSG_NOSIGNAL);
         if (len < 0) {
             if (is_ignorable_error()) {
                 retry_times++;
